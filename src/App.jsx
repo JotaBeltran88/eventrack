@@ -736,17 +736,29 @@ function ConteoView({ evento, upd, jornada, jornadaActivaId, setJornadaActivaId,
   const getCell = (ubic, pid) => jornada.conteo?.[ubic]?.[pid] || { inicial: 0, final: 0 };
   const setValor = (pid, campo, valor) => {
     const v = valor === "" ? 0 : Math.max(0, Number(valor));
-    upd((ev) => ({
-      ...ev,
-      jornadas: ev.jornadas.map((j) => {
-        if (j.id !== jornada.id) return j;
+    upd((ev) => {
+      // Localiza la jornada siguiente por fecha: su Inicial heredará este Final.
+      const orden = [...ev.jornadas].sort((a, b) => (a.fecha || "").localeCompare(b.fecha || ""));
+      const idx = orden.findIndex((j) => j.id === jornada.id);
+      const siguienteId = campo === "final" && idx >= 0 && idx < orden.length - 1 ? orden[idx + 1].id : null;
+
+      const ponerCampo = (j, campoSet, valorSet) => {
         const conteo = { ...j.conteo };
         const ubic = { ...(conteo[ubicActiva] || {}) };
-        ubic[pid] = { ...(ubic[pid] || { inicial: 0, final: 0 }), [campo]: v };
+        ubic[pid] = { ...(ubic[pid] || { inicial: 0, final: 0 }), [campoSet]: valorSet };
         conteo[ubicActiva] = ubic;
         return { ...j, conteo };
-      }),
-    }));
+      };
+
+      return {
+        ...ev,
+        jornadas: ev.jornadas.map((j) => {
+          if (j.id === jornada.id) return ponerCampo(j, campo, v);
+          if (siguienteId && j.id === siguienteId) return ponerCampo(j, "inicial", v); // final de hoy = inicial de mañana
+          return j;
+        }),
+      };
+    });
   };
 
   const categorias = [...new Set(evento.productos.map((p) => p.categoria))];
@@ -781,6 +793,7 @@ function ConteoView({ evento, upd, jornada, jornadaActivaId, setJornadaActivaId,
         <div style={styles.empty}>Elige una familia de productos para ver sus referencias.</div>
       ) : (
         <div style={{ marginBottom: 26 }}>
+          <div style={styles.dimText}>El Inicial de cada jornada se hereda del Final de la anterior. Puedes sobrescribirlo si hubo reposición.</div>
           <div style={styles.tableHead}>
             <span style={{ flex: 2 }}>Producto</span>
             <span style={styles.colNum}>Inicial</span><span style={styles.colNum}>Final</span><span style={styles.colNum}>Consumo</span>
