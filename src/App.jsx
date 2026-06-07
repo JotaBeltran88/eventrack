@@ -742,7 +742,6 @@ function JornadaSelector({ evento, jornadaActivaId, setJornadaActivaId }) {
 
 function ConteoView({ evento, role, upd, jornada, jornadaActivaId, setJornadaActivaId, ubicActiva, setUbicActiva, onGuardar }) {
   const [catActiva, setCatActiva] = useState("");
-  const [guardado, setGuardado] = useState(false);
   if (evento.ubicaciones.length === 0 || evento.productos.length === 0)
     return <div style={styles.empty}>Necesitas ubicaciones y referencias (Configuración) para el conteo.</div>;
   if (evento.jornadas.length === 0)
@@ -797,12 +796,6 @@ function ConteoView({ evento, role, upd, jornada, jornadaActivaId, setJornadaAct
 
   const categorias = [...new Set(evento.productos.map((p) => p.categoria))];
   const catSel = categorias.includes(catActiva) ? catActiva : "";
-
-  const guardar = async () => {
-    if (onGuardar) await onGuardar();
-    setGuardado(true);
-    setTimeout(() => setGuardado(false), 2500);
-  };
 
   return (
     <div>
@@ -864,9 +857,7 @@ function ConteoView({ evento, role, upd, jornada, jornadaActivaId, setJornadaAct
         </div>
       )}
 
-      {puedeEditar && <button onClick={guardar} style={styles.continueBtn}>Guardar</button>}
-      {guardado && <div style={{ color: COLORS.green, fontSize: 13, textAlign: "center", marginTop: 8 }}>Guardado ✓</div>}
-      <button onClick={() => descargarJornadaExcel(evento, jornada)} style={{ ...styles.smallBtn, width: "100%", marginTop: 10 }}>↓ Descargar inventario del día (Excel)</button>
+      <button onClick={() => descargarJornadaExcel(evento, jornada)} style={{ ...styles.smallBtn, width: "100%", marginTop: 18 }}>↓ Descargar inventario del día (Excel)</button>
     </div>
   );
 }
