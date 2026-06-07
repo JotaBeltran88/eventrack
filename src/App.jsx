@@ -458,7 +458,7 @@ function EventoDetalle({ evento, role, updateEvento, onGuardar }) {
       </div>
 
       <nav style={styles.tabs}>
-        {[["conteo", "Conteo"], ["resumen", "Resumen"]].map(([k, label]) => (
+        {(esAdmin ? [["conteo", "Conteo"], ["resumen", "Resumen"]] : [["conteo", "Conteo"]]).map(([k, label]) => (
           <button key={k} onClick={() => setTab(k)} style={{ ...styles.tab, ...(tab === k ? styles.tabActive : {}) }}>{label}</button>
         ))}
         {esAdmin && (
