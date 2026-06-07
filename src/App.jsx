@@ -133,6 +133,7 @@ export default function App() {
     catch { return null; }
   });
   const [showAcceso, setShowAcceso] = useState(false);
+  const [showPapelera, setShowPapelera] = useState(false);
 
   const role = session?.role || null;
   const handleLogin = (r) => {
@@ -145,6 +146,7 @@ export default function App() {
     setSession(null);
     setEventoActivoId(null);
     setShowAcceso(false);
+    setShowPapelera(false);
   };
 
   // Guarda la última versión sincronizada para no reescribir/recargar en bucle.
@@ -204,10 +206,14 @@ export default function App() {
     setEventos((prev) => [...prev, ev]);
     return ev.id;
   };
+  // Eliminar = mover a la papelera (borrado lógico, recuperable).
   const removeEvento = (id) => {
-    setEventos((prev) => prev.filter((ev) => ev.id !== id));
+    updateEvento(id, (ev) => ({ ...ev, borrado: true }));
     if (eventoActivoId === id) setEventoActivoId(null);
   };
+  const restaurarEvento = (id) => updateEvento(id, (ev) => ({ ...ev, borrado: false }));
+  const eliminarDefinitivo = (id) =>
+    setEventos((prev) => prev.filter((ev) => ev.id !== id));
 
   if (!session) {
     return <Login onLogin={handleLogin} />;
@@ -230,9 +236,9 @@ export default function App() {
       <header style={styles.header}>
         <div>
           {eventoActivo && (
-            <button onClick={() => setEventoActivoId(null)} style={styles.volverBtn}>‹ Volver a eventos</button>
+            <button onClick={() => { setEventoActivoId(null); setShowAcceso(false); setShowPapelera(false); }} style={styles.volverBtn}>‹ Volver a eventos</button>
           )}
-          <div style={{ cursor: "pointer" }} onClick={() => setEventoActivoId(null)}>
+          <div style={{ cursor: "pointer" }} onClick={() => { setEventoActivoId(null); setShowAcceso(false); setShowPapelera(false); }}>
             <div style={styles.kicker}>J.B.APP</div>
             <h1 style={styles.title}>Event<span style={{ color: COLORS.gold }}>rack</span></h1>
           </div>
@@ -241,7 +247,10 @@ export default function App() {
           <span style={styles.saveTag}>{saving ? "Guardando…" : "Guardado ✓"}</span>
           <span style={styles.roleTag}>{role === "admin" ? "Admin" : "Contador"}</span>
           {role === "admin" && (
-            <button onClick={() => { setEventoActivoId(null); setShowAcceso(true); }} style={styles.linkBtn}>⚙ Acceso</button>
+            <button onClick={() => { setEventoActivoId(null); setShowPapelera(false); setShowAcceso(true); }} style={styles.linkBtn}>⚙ Acceso</button>
+          )}
+          {role === "admin" && (
+            <button onClick={() => { setEventoActivoId(null); setShowAcceso(false); setShowPapelera(true); }} style={styles.linkBtn}>🗑 Papelera</button>
           )}
           <button onClick={cerrarSesion} style={styles.linkBtn}>Cerrar sesión</button>
         </div>
@@ -249,6 +258,8 @@ export default function App() {
 
       {showAcceso ? (
         <AccessView onClose={() => setShowAcceso(false)} />
+      ) : showPapelera ? (
+        <PapeleraView eventos={eventos} onClose={() => setShowPapelera(false)} onRestore={restaurarEvento} onHardDelete={eliminarDefinitivo} />
       ) : !eventoActivo ? (
         <EventosList eventos={eventos} role={role} onOpen={setEventoActivoId} onAddCompleto={addEventoCompleto} onRemove={removeEvento} updateEvento={updateEvento} />
       ) : (
@@ -364,6 +375,7 @@ function EventosList({ eventos, role, onOpen, onAddCompleto, onRemove, updateEve
           <div style={styles.formRow}>
             <button onClick={guardarEdicion} style={styles.addBtn}>Guardar</button>
             <button onClick={() => setEditId(null)} style={styles.smallBtn}>Cancelar</button>
+            <button onClick={() => { if (confirm(`¿Mover "${ev.nombre}" a la papelera?`)) { onRemove(ev.id); setEditId(null); } }} style={styles.deleteBtn}>Eliminar</button>
           </div>
         </div>
       );
@@ -385,8 +397,8 @@ function EventosList({ eventos, role, onOpen, onAddCompleto, onRemove, updateEve
   const porInicioAsc = (a, b) => (a.fecha || "9999-99-99").localeCompare(b.fecha || "9999-99-99");
   // Pasados: por fecha de fin descendente (el más reciente primero).
   const porFinDesc = (a, b) => (fechaFinEvento(b) || "").localeCompare(fechaFinEvento(a) || "");
-  const enCurso = eventos.filter((ev) => !esEventoPasado(ev)).sort(porInicioAsc);
-  const pasados = eventos.filter((ev) => esEventoPasado(ev)).sort(porFinDesc);
+  const enCurso = eventos.filter((ev) => !ev.borrado && !esEventoPasado(ev)).sort(porInicioAsc);
+  const pasados = eventos.filter((ev) => !ev.borrado && esEventoPasado(ev)).sort(porFinDesc);
 
   return (
     <div>
@@ -946,6 +958,30 @@ function Login({ onLogin }) {
   );
 }
 
+function PapeleraView({ eventos, onClose, onRestore, onHardDelete }) {
+  const borrados = eventos.filter((ev) => ev.borrado);
+  return (
+    <div>
+      <button onClick={onClose} style={styles.volverBtn}>‹ Volver</button>
+      <div style={{ ...styles.sectionTitle, marginTop: 14 }}>Papelera</div>
+      <div style={styles.dimText}>Eventos eliminados. Puedes restaurarlos o borrarlos definitivamente (esto último no se puede deshacer).</div>
+      {borrados.length === 0 && <div style={styles.empty}>La papelera está vacía.</div>}
+      <div style={{ display: "grid", gap: 10, marginTop: 8 }}>
+        {borrados.map((ev) => (
+          <div key={ev.id} style={styles.eventCard}>
+            <div style={{ flex: 1 }}>
+              <div style={styles.eventName}>{ev.nombre}</div>
+              <div style={styles.eventMeta}>{ev.fecha ? fechaLabel(ev.fecha) : "Sin fecha"} · {ev.jornadas.length} {ev.jornadas.length === 1 ? "jornada" : "jornadas"}</div>
+            </div>
+            <button onClick={() => onRestore(ev.id)} style={styles.smallBtn}>↩ Restaurar</button>
+            <button onClick={() => { if (confirm(`¿Eliminar definitivamente "${ev.nombre}"? Esto NO se puede deshacer.`)) onHardDelete(ev.id); }} style={styles.deleteBtn}>Eliminar def.</button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function AccessView({ onClose }) {
   const [actual, setActual] = useState("");
   const [nuevoAdmin, setNuevoAdmin] = useState("");
@@ -1056,6 +1092,7 @@ const styles = {
   exportBtn: { background: "transparent", border: `1px solid ${COLORS.gold}`, color: COLORS.gold, fontSize: 13, fontWeight: 600, padding: "8px 14px", borderRadius: 8, whiteSpace: "nowrap" },
   importBtn: { background: "transparent", border: `1px solid ${COLORS.goldDim}`, color: COLORS.cream, fontSize: 14, fontWeight: 600, padding: "9px 18px", borderRadius: 7, whiteSpace: "nowrap" },
   editBtn: { background: "transparent", border: `1px solid ${COLORS.line}`, color: COLORS.gold, fontSize: 14, lineHeight: 1, padding: "6px 9px", borderRadius: 8 },
+  deleteBtn: { background: "transparent", border: `1px solid ${COLORS.red}`, color: COLORS.red, fontSize: 13, fontWeight: 600, padding: "8px 14px", borderRadius: 7, whiteSpace: "nowrap" },
   xBtn: { background: "transparent", border: "none", color: COLORS.red, fontSize: 22, lineHeight: 1, padding: "0 6px" },
   xBtnSm: { background: "transparent", border: "none", color: COLORS.red, fontSize: 18, lineHeight: 1, padding: "0 4px" },
 };
