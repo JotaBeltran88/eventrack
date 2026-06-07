@@ -381,8 +381,12 @@ function EventosList({ eventos, role, onOpen, onAddCompleto, onRemove, updateEve
     );
   };
 
-  const enCurso = eventos.filter((ev) => !esEventoPasado(ev));
-  const pasados = eventos.filter((ev) => esEventoPasado(ev));
+  // En curso: por fecha de inicio ascendente (sin fecha al final).
+  const porInicioAsc = (a, b) => (a.fecha || "9999-99-99").localeCompare(b.fecha || "9999-99-99");
+  // Pasados: por fecha de fin descendente (el más reciente primero).
+  const porFinDesc = (a, b) => (fechaFinEvento(b) || "").localeCompare(fechaFinEvento(a) || "");
+  const enCurso = eventos.filter((ev) => !esEventoPasado(ev)).sort(porInicioAsc);
+  const pasados = eventos.filter((ev) => esEventoPasado(ev)).sort(porFinDesc);
 
   return (
     <div>
