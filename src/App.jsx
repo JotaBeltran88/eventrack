@@ -452,7 +452,8 @@ function EventosList({ eventos, role, onOpen, onAddCompleto, onRemove, updateEve
 
 function EventoDetalle({ evento, role, updateEvento }) {
   const esAdmin = role === "admin";
-  const [tab, setTab] = useState(role === "admin" ? "config" : "conteo");
+  const [modo, setModo] = useState(esAdmin && !evento.configurado ? "config" : "operar");
+  const [tab, setTab] = useState("conteo");
   const [jornadaActivaId, setJornadaActivaId] = useState(evento.jornadas[0]?.id || null);
   const [ubicActiva, setUbicActiva] = useState(evento.ubicaciones[0] || "");
 
@@ -470,6 +471,29 @@ function EventoDetalle({ evento, role, updateEvento }) {
 
   const jornadaActiva = evento.jornadas.find((j) => j.id === jornadaActivaId) || null;
 
+  // ── Fase 1: configuración del evento (solo admin) ──
+  if (modo === "config") {
+    return (
+      <div>
+        <div style={styles.eventHeader}>
+          <div>
+            <div style={styles.eventTitle}>{evento.nombre}</div>
+            <div style={styles.eventMeta}>Configuración del evento</div>
+          </div>
+        </div>
+        <ConfigView evento={evento} upd={upd} />
+        <JornadasView evento={evento} upd={upd} jornadaActivaId={jornadaActivaId} setJornadaActivaId={setJornadaActivaId} />
+        <button
+          onClick={() => { upd((ev) => ({ ...ev, configurado: true })); setTab("conteo"); setModo("operar"); }}
+          style={styles.continueBtn}
+        >
+          Guardar configuración y continuar →
+        </button>
+      </div>
+    );
+  }
+
+  // ── Fase 2: operar el evento (conteo y resumen) ──
   return (
     <div>
       <div style={styles.eventHeader}>
@@ -481,20 +505,14 @@ function EventoDetalle({ evento, role, updateEvento }) {
       </div>
 
       <nav style={styles.tabs}>
-        {(esAdmin
-          ? [["config", "Configuración"], ["conteo", "Conteo"], ["resumen", "Resumen"]]
-          : [["conteo", "Conteo"], ["resumen", "Resumen"]]
-        ).map(([k, label]) => (
+        {[["conteo", "Conteo"], ["resumen", "Resumen"]].map(([k, label]) => (
           <button key={k} onClick={() => setTab(k)} style={{ ...styles.tab, ...(tab === k ? styles.tabActive : {}) }}>{label}</button>
         ))}
+        {esAdmin && (
+          <button onClick={() => setModo("config")} style={styles.tab}>⚙ Configuración</button>
+        )}
       </nav>
 
-      {tab === "config" && (
-        <>
-          <ConfigView evento={evento} upd={upd} />
-          <JornadasView evento={evento} upd={upd} jornadaActivaId={jornadaActivaId} setJornadaActivaId={setJornadaActivaId} />
-        </>
-      )}
       {tab === "conteo" && (
         <ConteoView evento={evento} upd={upd} jornada={jornadaActiva} jornadaActivaId={jornadaActivaId} setJornadaActivaId={setJornadaActivaId} ubicActiva={ubicActiva} setUbicActiva={setUbicActiva} />
       )}
@@ -1093,6 +1111,7 @@ const styles = {
   importBtn: { background: "transparent", border: `1px solid ${COLORS.goldDim}`, color: COLORS.cream, fontSize: 14, fontWeight: 600, padding: "9px 18px", borderRadius: 7, whiteSpace: "nowrap" },
   editBtn: { background: "transparent", border: `1px solid ${COLORS.line}`, color: COLORS.gold, fontSize: 14, lineHeight: 1, padding: "6px 9px", borderRadius: 8 },
   deleteBtn: { background: "transparent", border: `1px solid ${COLORS.red}`, color: COLORS.red, fontSize: 13, fontWeight: 600, padding: "8px 14px", borderRadius: 7, whiteSpace: "nowrap" },
+  continueBtn: { background: COLORS.gold, border: "none", color: COLORS.bg, fontWeight: 700, fontSize: 15, padding: "14px 18px", borderRadius: 9, width: "100%", marginTop: 22 },
   xBtn: { background: "transparent", border: "none", color: COLORS.red, fontSize: 22, lineHeight: 1, padding: "0 6px" },
   xBtnSm: { background: "transparent", border: "none", color: COLORS.red, fontSize: 18, lineHeight: 1, padding: "0 4px" },
 };
