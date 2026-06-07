@@ -722,6 +722,7 @@ function JornadaSelector({ evento, jornadaActivaId, setJornadaActivaId }) {
 }
 
 function ConteoView({ evento, upd, jornada, jornadaActivaId, setJornadaActivaId, ubicActiva, setUbicActiva }) {
+  const [catActiva, setCatActiva] = useState("");
   if (evento.ubicaciones.length === 0 || evento.productos.length === 0)
     return <div style={styles.empty}>Necesitas ubicaciones y referencias (Configuración) para el conteo.</div>;
   if (evento.jornadas.length === 0)
@@ -745,6 +746,7 @@ function ConteoView({ evento, upd, jornada, jornadaActivaId, setJornadaActivaId,
   };
 
   const categorias = [...new Set(evento.productos.map((p) => p.categoria))];
+  const catSel = categorias.includes(catActiva) ? catActiva : (categorias[0] || "");
 
   return (
     <div>
@@ -754,27 +756,34 @@ function ConteoView({ evento, upd, jornada, jornadaActivaId, setJornadaActivaId,
           <button key={u} onClick={() => setUbicActiva(u)} style={{ ...styles.chip, ...(u === ubicActiva ? styles.chipActive : {}) }}>{u}</button>
         ))}
       </div>
-      {categorias.map((cat) => (
-        <div key={cat} style={{ marginBottom: 26 }}>
-          <div style={styles.catTitle}>{cat}</div>
-          <div style={styles.tableHead}>
-            <span style={{ flex: 2 }}>Producto</span>
-            <span style={styles.colNum}>Inicial</span><span style={styles.colNum}>Final</span><span style={styles.colNum}>Consumo</span>
-          </div>
-          {evento.productos.filter((p) => p.categoria === cat).map((p) => {
-            const c = getCell(ubicActiva, p.id);
-            const consumo = Math.max(0, c.inicial - c.final);
-            return (
-              <div key={p.id} style={styles.row}>
-                <span style={{ flex: 2 }}><span style={{ color: COLORS.cream }}>{p.nombre}</span><span style={styles.unidad}> · {p.unidad}</span></span>
-                <input type="number" min="0" value={c.inicial || ""} placeholder="0" onChange={(e) => setValor(p.id, "inicial", e.target.value)} style={styles.input} />
-                <input type="number" min="0" value={c.final || ""} placeholder="0" onChange={(e) => setValor(p.id, "final", e.target.value)} style={styles.input} />
-                <span style={{ ...styles.colNum, color: consumo > 0 ? COLORS.gold : COLORS.dim, fontWeight: 600 }}>{consumo}</span>
-              </div>
-            );
-          })}
+
+      <div style={{ marginBottom: 18 }}>
+        <label style={{ ...styles.fieldLabel, display: "block", marginBottom: 6 }}>Familia de productos</label>
+        <select value={catSel} onChange={(e) => setCatActiva(e.target.value)} style={styles.select}>
+          {categorias.map((cat) => (
+            <option key={cat} value={cat}>{cat}</option>
+          ))}
+        </select>
+      </div>
+
+      <div style={{ marginBottom: 26 }}>
+        <div style={styles.tableHead}>
+          <span style={{ flex: 2 }}>Producto</span>
+          <span style={styles.colNum}>Inicial</span><span style={styles.colNum}>Final</span><span style={styles.colNum}>Consumo</span>
         </div>
-      ))}
+        {evento.productos.filter((p) => p.categoria === catSel).map((p) => {
+          const c = getCell(ubicActiva, p.id);
+          const consumo = Math.max(0, c.inicial - c.final);
+          return (
+            <div key={p.id} style={styles.row}>
+              <span style={{ flex: 2 }}><span style={{ color: COLORS.cream }}>{p.nombre}</span><span style={styles.unidad}> · {p.unidad}</span></span>
+              <input type="number" min="0" value={c.inicial || ""} placeholder="0" onChange={(e) => setValor(p.id, "inicial", e.target.value)} style={styles.input} />
+              <input type="number" min="0" value={c.final || ""} placeholder="0" onChange={(e) => setValor(p.id, "final", e.target.value)} style={styles.input} />
+              <span style={{ ...styles.colNum, color: consumo > 0 ? COLORS.gold : COLORS.dim, fontWeight: 600 }}>{consumo}</span>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
