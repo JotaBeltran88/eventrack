@@ -719,9 +719,12 @@ function JornadaSelector({ evento, jornadaActivaId, setJornadaActivaId }) {
       <div style={{ marginBottom: 18 }}>
         <label style={{ ...styles.fieldLabel, display: "block", marginBottom: 6 }}>Jornada</label>
         <select value={jornadaActivaId || ""} onChange={(e) => setJornadaActivaId(e.target.value)} style={styles.select}>
-          {evento.jornadas.map((j) => (
-            <option key={j.id} value={j.id}>{fechaLabel(j.fecha)}{j.editable === false ? " · 🔒 solo lectura" : ""}</option>
-          ))}
+          {evento.jornadas.map((j) => {
+            const conf = evento.ubicaciones.filter((u) => j.confirmado && j.confirmado[u]).length;
+            return (
+              <option key={j.id} value={j.id}>{fechaLabel(j.fecha)} · {conf}/{evento.ubicaciones.length} ✓{j.editable === false ? " · 🔒" : ""}</option>
+            );
+          })}
         </select>
       </div>
     );
@@ -748,6 +751,21 @@ function ConteoView({ evento, role, upd, jornada, jornadaActivaId, setJornadaAct
 
   const getCell = (ubic, pid) => jornada.conteo?.[ubic]?.[pid] || { inicial: 0, final: 0 };
   const puedeEditar = role === "admin" || jornada.editable !== false;
+
+  const confirmadoUbic = (u) => !!(jornada.confirmado && jornada.confirmado[u]);
+  const confirmado = confirmadoUbic(ubicActiva);
+  const confirmadasCount = evento.ubicaciones.filter(confirmadoUbic).length;
+  const setConfirmado = (val) => {
+    upd((ev) => ({
+      ...ev,
+      jornadas: ev.jornadas.map((j) => {
+        if (j.id !== jornada.id) return j;
+        const conf = { ...(j.confirmado || {}) };
+        if (val) conf[ubicActiva] = true; else delete conf[ubicActiva];
+        return { ...j, confirmado: conf };
+      }),
+    }));
+  };
 
   const setValor = (pid, campo, valor) => {
     if (!puedeEditar) return;
@@ -791,8 +809,21 @@ function ConteoView({ evento, role, upd, jornada, jornadaActivaId, setJornadaAct
       <JornadaSelector evento={evento} jornadaActivaId={jornadaActivaId} setJornadaActivaId={setJornadaActivaId} />
       <div style={styles.chipWrap}>
         {evento.ubicaciones.map((u) => (
-          <button key={u} onClick={() => setUbicActiva(u)} style={{ ...styles.chip, ...(u === ubicActiva ? styles.chipActive : {}) }}>{u}</button>
+          <button key={u} onClick={() => setUbicActiva(u)} style={{ ...styles.chip, ...(u === ubicActiva ? styles.chipActive : {}), ...(confirmadoUbic(u) && u !== ubicActiva ? styles.chipDone : {}) }}>{u}{confirmadoUbic(u) ? " ✓" : ""}</button>
         ))}
+      </div>
+
+      <div style={styles.confirmBar}>
+        <span style={{ fontSize: 13 }}>
+          {confirmado
+            ? <span style={{ color: COLORS.green, fontWeight: 600 }}>✓ {ubicActiva} confirmada</span>
+            : <span style={{ color: COLORS.dim }}>{ubicActiva}: pendiente de confirmar</span>}
+          <span style={{ color: COLORS.dim }}>{"  ·  "}{confirmadasCount}/{evento.ubicaciones.length} ubicaciones confirmadas</span>
+        </span>
+        {puedeEditar && (confirmado
+          ? <button onClick={() => setConfirmado(false)} style={styles.smallBtn}>Reabrir</button>
+          : <button onClick={() => setConfirmado(true)} style={styles.addBtn}>✓ Confirmar inventario</button>
+        )}
       </div>
 
       {!puedeEditar && (
@@ -1144,6 +1175,8 @@ const styles = {
   chipWrap: { display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 18, alignItems: "center" },
   chip: { background: COLORS.panel, border: `1px solid ${COLORS.line}`, color: COLORS.dim, padding: "7px 15px", borderRadius: 20, fontSize: 13, fontWeight: 500 },
   chipActive: { background: COLORS.gold, color: COLORS.bg, borderColor: COLORS.gold },
+  chipDone: { borderColor: COLORS.green, color: COLORS.green },
+  confirmBar: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap", background: COLORS.panel, border: `1px solid ${COLORS.line}`, borderRadius: 10, padding: "10px 14px", marginBottom: 18 },
   chipEdit: { background: COLORS.panel, border: `1px solid ${COLORS.line}`, color: COLORS.cream, padding: "6px 8px 6px 14px", borderRadius: 20, fontSize: 13, display: "inline-flex", alignItems: "center", gap: 4 },
   jornadaRow: { display: "flex", alignItems: "center", gap: 10, background: COLORS.panel, border: `1px solid ${COLORS.line}`, borderRadius: 10, padding: "12px 14px", cursor: "pointer" },
   jornadaRowActive: { borderColor: COLORS.gold, background: COLORS.panel2 },
