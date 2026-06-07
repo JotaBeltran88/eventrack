@@ -276,9 +276,6 @@ function EventosList({ eventos, role, onOpen, onAddCompleto, onRemove, updateEve
   const [fecha, setFecha] = useState("");
   const [desde, setDesde] = useState("");
   const [hasta, setHasta] = useState("");
-  const [importMsg, setImportMsg] = useState(null);
-  const fileRef = React.useRef(null);
-
   const [editId, setEditId] = useState(null);
   const [editNombre, setEditNombre] = useState("");
   const [editFecha, setEditFecha] = useState("");
@@ -313,49 +310,6 @@ function EventosList({ eventos, role, onOpen, onAddCompleto, onRemove, updateEve
     const id = onAddCompleto(ev);
     setNombre(""); setFecha(""); setDesde(""); setHasta(""); setTipo("single");
     onOpen(id);
-  };
-
-  const onFile = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setImportMsg("Leyendo archivo…");
-    try {
-      const buf = await file.arrayBuffer();
-      const wb = XLSX.read(buf, { type: "array" });
-      const { ubicaciones, productos } = parsearPlantilla(wb);
-
-      if (ubicaciones.length === 0 && productos.length === 0) {
-        setImportMsg("No se encontraron datos. Revisa que las hojas se llamen Ubicaciones y Productos.");
-        e.target.value = "";
-        return;
-      }
-
-      const t = Date.now().toString(36);
-      const single = tipo === "single";
-      const prods = productos.map((p, i) => ({ id: "p" + t + i, ...p }));
-      const conteoBase = Object.fromEntries(ubicaciones.map((u) => [u, Object.fromEntries(prods.map((p) => [p.id, { inicial: 0, final: 0 }]))]));
-      const jornadasRaw = single ? (fecha ? [jornadaVacia(fecha)] : []) : jornadasDeRango(desde, hasta);
-      const jornadas = jornadasRaw.map((j) => ({ ...j, conteo: JSON.parse(JSON.stringify(conteoBase)) }));
-
-      const ev = {
-        id: "ev" + t,
-        nombre: (nombre.trim() || file.name.replace(/\.(xlsx|xls)$/i, "")) || "Evento importado",
-        tipo,
-        fecha: (single ? fecha : desde) || "",
-        fechaFin: (single ? fecha : hasta) || "",
-        ubicaciones,
-        productos: prods,
-        jornadas,
-      };
-      const id = onAddCompleto(ev);
-      setNombre(""); setFecha(""); setDesde(""); setHasta(""); setTipo("single");
-      e.target.value = "";
-      onOpen(id);
-    } catch (err) {
-      console.error(err);
-      setImportMsg("No se pudo leer el archivo. Asegúrate de que es un .xlsx válido.");
-      e.target.value = "";
-    }
   };
 
   const metaLinea = (ev) => {
@@ -420,14 +374,10 @@ function EventosList({ eventos, role, onOpen, onAddCompleto, onRemove, updateEve
           )}
           <div style={styles.formRow}>
             <button onClick={crear} style={styles.addBtn}>+ Crear evento</button>
-            <button onClick={() => { setImportMsg(null); fileRef.current?.click(); }} style={styles.importBtn}>↑ Importar desde Excel</button>
-            <button onClick={descargarPlantillaBlanco} style={styles.smallBtn}>↓ Descargar plantilla</button>
           </div>
-          <input ref={fileRef} type="file" accept=".xlsx,.xls" onChange={onFile} style={{ display: "none" }} />
           <div style={styles.dimText}>
-            Elige si el evento es de un solo día o de varios. En "varios días" se crean automáticamente las jornadas del rango. Las ubicaciones y productos se configuran dentro del evento, o impórtalos del Excel.
+            Elige si el evento es de un solo día o de varios. En "varios días" se crean automáticamente las jornadas del rango. Las ubicaciones y productos se añaden en el siguiente paso, al configurar el evento.
           </div>
-          {importMsg && <div style={{ color: COLORS.red, fontSize: 13 }}>{importMsg}</div>}
         </div>
       )}
 
