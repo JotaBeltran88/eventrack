@@ -697,6 +697,19 @@ function ConfigView({ evento, upd }) {
 
 function JornadaSelector({ evento, jornadaActivaId, setJornadaActivaId }) {
   if (evento.jornadas.length === 0) return null;
+  // Varios días → desplegable (evita un muro de chips). Un día → etiqueta.
+  if (evento.tipo === "multi") {
+    return (
+      <div style={{ marginBottom: 18 }}>
+        <label style={{ ...styles.fieldLabel, display: "block", marginBottom: 6 }}>Jornada</label>
+        <select value={jornadaActivaId || ""} onChange={(e) => setJornadaActivaId(e.target.value)} style={styles.select}>
+          {evento.jornadas.map((j) => (
+            <option key={j.id} value={j.id}>{fechaLabel(j.fecha)}</option>
+          ))}
+        </select>
+      </div>
+    );
+  }
   return (
     <div style={styles.chipWrap}>
       {evento.jornadas.map((j) => (
@@ -732,8 +745,17 @@ function ConteoView({ evento, upd, jornada, jornadaActivaId, setJornadaActivaId,
   };
 
   const categorias = [...new Set(evento.productos.map((p) => p.categoria))];
-  let totalConsumo = 0;
-  evento.productos.forEach((p) => { const c = getCell(ubicActiva, p.id); totalConsumo += Math.max(0, c.inicial - c.final); });
+
+  // Totalización de la jornada: suma de inicial, final y consumo de todas las ubicaciones.
+  let totInicial = 0, totFinal = 0, totConsumo = 0;
+  evento.ubicaciones.forEach((u) => {
+    evento.productos.forEach((p) => {
+      const c = getCell(u, p.id);
+      totInicial += c.inicial || 0;
+      totFinal += c.final || 0;
+      totConsumo += Math.max(0, (c.inicial || 0) - (c.final || 0));
+    });
+  });
 
   return (
     <div>
@@ -743,11 +765,11 @@ function ConteoView({ evento, upd, jornada, jornadaActivaId, setJornadaActivaId,
           <button key={u} onClick={() => setUbicActiva(u)} style={{ ...styles.chip, ...(u === ubicActiva ? styles.chipActive : {}) }}>{u}</button>
         ))}
       </div>
-      <div style={styles.summaryBar}>
-        <span style={{ color: COLORS.dim }}>{fechaLabel(jornada.fecha)} ·</span>
-        <strong style={{ color: COLORS.cream }}>{ubicActiva}</strong>
-        <span style={styles.bigNum}>{totalConsumo}</span>
-        <span style={{ color: COLORS.dim, fontSize: 13 }}>uds.</span>
+      <div style={styles.totalBar}>
+        <span style={{ color: COLORS.dim, fontSize: 12, width: "100%", marginBottom: 2 }}>Totalización · {fechaLabel(jornada.fecha)} · todas las ubicaciones</span>
+        <div style={styles.totalItem}><span style={styles.totalLabel}>Inicial</span><span style={styles.totalNum}>{totInicial}</span></div>
+        <div style={styles.totalItem}><span style={styles.totalLabel}>Final</span><span style={styles.totalNum}>{totFinal}</span></div>
+        <div style={styles.totalItem}><span style={styles.totalLabel}>Consumo</span><span style={{ ...styles.totalNum, color: COLORS.gold }}>{totConsumo}</span></div>
       </div>
       {categorias.map((cat) => (
         <div key={cat} style={{ marginBottom: 26 }}>
@@ -1055,6 +1077,11 @@ const styles = {
   formCard: { background: COLORS.panel, border: `1px solid ${COLORS.line}`, borderRadius: 12, padding: 16, marginTop: 14, marginBottom: 14, display: "flex", flexDirection: "column", gap: 10 },
   formCardTitle: { fontFamily: "'Fraunces', serif", fontSize: 16, fontWeight: 600, color: COLORS.gold },
   textInput: { flex: 1, minWidth: 120, background: COLORS.panel2, border: `1px solid ${COLORS.line}`, borderRadius: 7, color: COLORS.cream, fontSize: 14, padding: "9px 12px", fontFamily: "'Outfit', sans-serif" },
+  select: { width: "100%", background: COLORS.panel2, border: `1px solid ${COLORS.line}`, borderRadius: 8, color: COLORS.cream, fontSize: 15, padding: "11px 12px", fontFamily: "'Outfit', sans-serif" },
+  totalBar: { background: COLORS.panel, border: `1px solid ${COLORS.line}`, borderRadius: 12, padding: "14px 18px", marginBottom: 22, display: "flex", flexWrap: "wrap", gap: 22, alignItems: "center" },
+  totalItem: { display: "flex", flexDirection: "column", gap: 2 },
+  totalLabel: { fontSize: 11, letterSpacing: "0.08em", textTransform: "uppercase", color: COLORS.dim },
+  totalNum: { fontFamily: "'Fraunces', serif", fontSize: 24, fontWeight: 900, color: COLORS.cream },
   addBtn: { background: COLORS.gold, border: "none", color: COLORS.bg, fontWeight: 600, fontSize: 14, padding: "9px 18px", borderRadius: 7, whiteSpace: "nowrap" },
   smallBtn: { background: COLORS.panel, border: `1px solid ${COLORS.line}`, color: COLORS.cream, fontSize: 13, padding: "7px 14px", borderRadius: 7 },
   exportBtn: { background: "transparent", border: `1px solid ${COLORS.gold}`, color: COLORS.gold, fontSize: 13, fontWeight: 600, padding: "8px 14px", borderRadius: 8, whiteSpace: "nowrap" },
