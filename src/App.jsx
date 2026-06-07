@@ -271,6 +271,7 @@ function EventosList({ eventos, role, onOpen, onAddCompleto, onRemove, updateEve
   const [editId, setEditId] = useState(null);
   const [editNombre, setEditNombre] = useState("");
   const [editFecha, setEditFecha] = useState("");
+  const [pasadosAbierto, setPasadosAbierto] = useState(false);
   const empezarEdicion = (ev) => { setEditId(ev.id); setEditNombre(ev.nombre); setEditFecha(ev.fecha || ""); };
   const guardarEdicion = () => {
     updateEvento(editId, (ev) => ({ ...ev, nombre: editNombre.trim() || ev.nombre, fecha: editFecha }));
@@ -420,11 +421,15 @@ function EventosList({ eventos, role, onOpen, onAddCompleto, onRemove, updateEve
         {enCurso.map(tarjeta)}
       </div>
 
-      <div style={styles.sectionTitle}>Eventos pasados</div>
-      {pasados.length === 0 && <div style={styles.empty}>No hay eventos pasados.</div>}
-      <div style={{ display: "grid", gap: 10, marginBottom: 28 }}>
-        {pasados.map(tarjeta)}
+      <div onClick={() => setPasadosAbierto((v) => !v)} style={styles.collapseHeader}>
+        <span style={{ ...styles.sectionTitle, marginBottom: 0 }}>Eventos pasados</span>
+        <span style={styles.collapseMeta}>{pasados.length} {pasadosAbierto ? "▲" : "▼"}</span>
       </div>
+      {pasadosAbierto && (
+        pasados.length === 0
+          ? <div style={styles.empty}>No hay eventos pasados.</div>
+          : <div style={{ display: "grid", gap: 10, marginBottom: 28 }}>{pasados.map(tarjeta)}</div>
+      )}
     </div>
   );
 }
@@ -1004,6 +1009,8 @@ const styles = {
   fieldLabel: { fontSize: 12, color: COLORS.dim, fontWeight: 500, marginTop: 4 },
   volverBtn: { background: "transparent", border: `1px solid ${COLORS.line}`, color: COLORS.gold, fontSize: 13, fontWeight: 500, padding: "5px 12px", borderRadius: 18, marginBottom: 8 },
   sectionTitle: { fontFamily: "'Fraunces', serif", fontSize: 22, fontWeight: 600, color: COLORS.cream, marginBottom: 16 },
+  collapseHeader: { display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer", marginBottom: 16 },
+  collapseMeta: { color: COLORS.gold, fontSize: 14, fontWeight: 600 },
   empty: { background: COLORS.panel, border: `1px solid ${COLORS.line}`, borderRadius: 12, padding: 24, color: COLORS.dim, textAlign: "center", fontSize: 14 },
   dimText: { color: COLORS.dim, fontSize: 13, fontStyle: "italic", marginBottom: 8, display: "block" },
   eventCard: { display: "flex", alignItems: "center", gap: 10, background: COLORS.panel, border: `1px solid ${COLORS.line}`, borderRadius: 12, padding: "16px 18px", cursor: "pointer" },
