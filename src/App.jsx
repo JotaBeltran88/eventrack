@@ -23,11 +23,37 @@ function nuevoEvento(nombre, fecha) {
   return {
     id: "ev" + Date.now().toString(36),
     nombre: nombre || "Evento sin nombre",
+    tipo: "single",
     fecha: fecha || "",
+    fechaFin: fecha || "",
     ubicaciones: [],
     productos: [],
     jornadas: [],
   };
+}
+
+// Una jornada vacía (sin conteo); el conteo se rellena al añadir ubicaciones/productos.
+function jornadaVacia(fecha) {
+  return { id: "j" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), fecha, conteo: {} };
+}
+
+function hoyISO() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+// Última fecha del evento (la jornada más tardía, o su fecha fin/inicio).
+function fechaFinEvento(ev) {
+  const fechas = (ev.jornadas || []).map((j) => j.fecha).filter(Boolean).sort();
+  if (fechas.length) return fechas[fechas.length - 1];
+  return ev.fechaFin || ev.fecha || "";
+}
+
+// Un evento es "pasado" si su última fecha ya quedó atrás. Sin fecha => en curso.
+function esEventoPasado(ev) {
+  const fin = fechaFinEvento(ev);
+  if (!fin) return false;
+  return fin < hoyISO();
 }
 
 function fechaLabel(iso) {
@@ -207,7 +233,7 @@ export default function App() {
             <button onClick={() => setEventoActivoId(null)} style={styles.volverBtn}>‹ Volver a eventos</button>
           )}
           <div style={{ cursor: "pointer" }} onClick={() => setEventoActivoId(null)}>
-            <div style={styles.kicker}>JOTA BELTRÁN</div>
+            <div style={styles.kicker}>J.B.APP</div>
             <h1 style={styles.title}>Event<span style={{ color: COLORS.gold }}>rack</span></h1>
           </div>
         </div>
@@ -224,7 +250,7 @@ export default function App() {
       {showAcceso ? (
         <AccessView onClose={() => setShowAcceso(false)} />
       ) : !eventoActivo ? (
-        <EventosList eventos={eventos} role={role} onOpen={setEventoActivoId} onAdd={addEvento} onAddCompleto={addEventoCompleto} onRemove={removeEvento} />
+        <EventosList eventos={eventos} role={role} onOpen={setEventoActivoId} onAddCompleto={addEventoCompleto} onRemove={removeEvento} updateEvento={updateEvento} />
       ) : (
         <EventoDetalle evento={eventoActivo} role={role} updateEvento={updateEvento} />
       )}
@@ -232,17 +258,48 @@ export default function App() {
   );
 }
 
-function EventosList({ eventos, role, onOpen, onAdd, onAddCompleto, onRemove }) {
+function EventosList({ eventos, role, onOpen, onAddCompleto, onRemove, updateEvento }) {
   const esAdmin = role === "admin";
+  const [tipo, setTipo] = useState("single");
   const [nombre, setNombre] = useState("");
   const [fecha, setFecha] = useState("");
+  const [desde, setDesde] = useState("");
+  const [hasta, setHasta] = useState("");
   const [importMsg, setImportMsg] = useState(null);
   const fileRef = React.useRef(null);
 
+  const [editId, setEditId] = useState(null);
+  const [editNombre, setEditNombre] = useState("");
+  const [editFecha, setEditFecha] = useState("");
+  const empezarEdicion = (ev) => { setEditId(ev.id); setEditNombre(ev.nombre); setEditFecha(ev.fecha || ""); };
+  const guardarEdicion = () => {
+    updateEvento(editId, (ev) => ({ ...ev, nombre: editNombre.trim() || ev.nombre, fecha: editFecha }));
+    setEditId(null);
+  };
+
+  const jornadasDeRango = (d1, d2) => {
+    const out = [];
+    if (!d1 || !d2) return out;
+    const start = new Date(d1 + "T00:00:00");
+    const end = new Date(d2 + "T00:00:00");
+    if (end < start) return out;
+    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) out.push(jornadaVacia(d.toISOString().slice(0, 10)));
+    return out;
+  };
+
   const crear = () => {
     if (!nombre.trim()) return;
-    const id = onAdd(nombre.trim(), fecha);
-    setNombre(""); setFecha("");
+    const t = Date.now().toString(36);
+    const single = tipo === "single";
+    const jornadas = single ? (fecha ? [jornadaVacia(fecha)] : []) : jornadasDeRango(desde, hasta);
+    const ev = {
+      id: "ev" + t, nombre: nombre.trim(), tipo,
+      fecha: (single ? fecha : desde) || "",
+      fechaFin: (single ? fecha : hasta) || "",
+      ubicaciones: [], productos: [], jornadas,
+    };
+    const id = onAddCompleto(ev);
+    setNombre(""); setFecha(""); setDesde(""); setHasta(""); setTipo("single");
     onOpen(id);
   };
 
@@ -262,16 +319,24 @@ function EventosList({ eventos, role, onOpen, onAdd, onAddCompleto, onRemove }) 
       }
 
       const t = Date.now().toString(36);
+      const single = tipo === "single";
+      const prods = productos.map((p, i) => ({ id: "p" + t + i, ...p }));
+      const conteoBase = Object.fromEntries(ubicaciones.map((u) => [u, Object.fromEntries(prods.map((p) => [p.id, { inicial: 0, final: 0 }]))]));
+      const jornadasRaw = single ? (fecha ? [jornadaVacia(fecha)] : []) : jornadasDeRango(desde, hasta);
+      const jornadas = jornadasRaw.map((j) => ({ ...j, conteo: JSON.parse(JSON.stringify(conteoBase)) }));
+
       const ev = {
         id: "ev" + t,
         nombre: (nombre.trim() || file.name.replace(/\.(xlsx|xls)$/i, "")) || "Evento importado",
-        fecha: fecha || "",
+        tipo,
+        fecha: (single ? fecha : desde) || "",
+        fechaFin: (single ? fecha : hasta) || "",
         ubicaciones,
-        productos: productos.map((p, i) => ({ id: "p" + t + i, ...p })),
-        jornadas: [],
+        productos: prods,
+        jornadas,
       };
       const id = onAddCompleto(ev);
-      setNombre(""); setFecha("");
+      setNombre(""); setFecha(""); setDesde(""); setHasta(""); setTipo("single");
       e.target.value = "";
       onOpen(id);
     } catch (err) {
@@ -281,53 +346,92 @@ function EventosList({ eventos, role, onOpen, onAdd, onAddCompleto, onRemove }) 
     }
   };
 
+  const metaLinea = (ev) => {
+    const nj = ev.jornadas.length;
+    const fechaTxt = ev.tipo === "multi" && ev.fecha && ev.fechaFin
+      ? `${fechaLabel(ev.fecha)} – ${fechaLabel(ev.fechaFin)}`
+      : (ev.fecha ? fechaLabel(ev.fecha) : "Sin fecha");
+    return `${fechaTxt} · ${nj} ${nj === 1 ? "jornada" : "jornadas"} · ${ev.ubicaciones.length} ubic. · ${ev.productos.length} ref.`;
+  };
+
+  const tarjeta = (ev) => {
+    if (editId === ev.id) {
+      return (
+        <div key={ev.id} style={{ ...styles.eventCard, flexDirection: "column", alignItems: "stretch", gap: 8 }}>
+          <input value={editNombre} onChange={(e) => setEditNombre(e.target.value)} placeholder="Nombre del evento" style={styles.textInput} />
+          <input type="date" value={editFecha} onChange={(e) => setEditFecha(e.target.value)} style={styles.textInput} />
+          <div style={styles.formRow}>
+            <button onClick={guardarEdicion} style={styles.addBtn}>Guardar</button>
+            <button onClick={() => setEditId(null)} style={styles.smallBtn}>Cancelar</button>
+          </div>
+        </div>
+      );
+    }
+    return (
+      <div key={ev.id} style={styles.eventCard} onClick={() => onOpen(ev.id)}>
+        <div style={{ flex: 1 }}>
+          <div style={styles.eventName}>{ev.nombre}</div>
+          <div style={styles.eventMeta}>{metaLinea(ev)}</div>
+        </div>
+        {esAdmin && <button onClick={(e) => { e.stopPropagation(); empezarEdicion(ev); }} style={styles.editBtn} title="Editar">✎</button>}
+        {esAdmin && <button onClick={(e) => { e.stopPropagation(); if (confirm(`¿Borrar "${ev.nombre}"?`)) onRemove(ev.id); }} style={styles.xBtn}>×</button>}
+        <span style={styles.chevron}>›</span>
+      </div>
+    );
+  };
+
+  const enCurso = eventos.filter((ev) => !esEventoPasado(ev));
+  const pasados = eventos.filter((ev) => esEventoPasado(ev));
+
   return (
     <div>
-      <div style={styles.sectionTitle}>Mis eventos</div>
-      {eventos.length === 0 && <div style={styles.empty}>{esAdmin ? "Aún no hay eventos. Crea el primero abajo." : "Aún no hay eventos disponibles. Pide a un administrador que cree uno."}</div>}
-
-      <div style={{ display: "grid", gap: 10, marginBottom: 28 }}>
-        {eventos.map((ev) => (
-          <div key={ev.id} style={styles.eventCard} onClick={() => onOpen(ev.id)}>
-            <div style={{ flex: 1 }}>
-              <div style={styles.eventName}>{ev.nombre}</div>
-              <div style={styles.eventMeta}>
-                {ev.fecha ? fechaLabel(ev.fecha) : "Sin fecha"} · {ev.jornadas.length} jornadas ·{" "}
-                {ev.ubicaciones.length} ubic. · {ev.productos.length} referencias
-              </div>
-            </div>
-            {esAdmin && (
-              <button onClick={(e) => { e.stopPropagation(); if (confirm(`¿Borrar "${ev.nombre}"?`)) onRemove(ev.id); }} style={styles.xBtn}>×</button>
-            )}
-            <span style={styles.chevron}>›</span>
-          </div>
-        ))}
-      </div>
-
       {esAdmin && (
-      <div style={styles.formCard}>
-        <div style={styles.formCardTitle}>Crear nuevo evento</div>
-        <input value={nombre} onChange={(e) => setNombre(e.target.value)} placeholder="Nombre del evento (ej. Noches del Botánico)" style={styles.textInput} />
-        <input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} style={styles.textInput} />
-        <div style={styles.formRow}>
-          <button onClick={crear} style={styles.addBtn}>+ Crear evento</button>
-          <button onClick={() => { setImportMsg(null); fileRef.current?.click(); }} style={styles.importBtn}>↑ Importar desde Excel</button>
-          <button onClick={descargarPlantillaBlanco} style={styles.smallBtn}>↓ Descargar plantilla</button>
+        <div style={styles.formCard}>
+          <div style={styles.formCardTitle}>Nuevo evento</div>
+          <input value={nombre} onChange={(e) => setNombre(e.target.value)} placeholder="Nombre del evento (ej. Noches del Botánico)" style={styles.textInput} />
+          <div style={styles.formRow}>
+            <button onClick={() => setTipo("single")} style={{ ...styles.chip, ...(tipo === "single" ? styles.chipActive : {}) }}>Un solo día</button>
+            <button onClick={() => setTipo("multi")} style={{ ...styles.chip, ...(tipo === "multi" ? styles.chipActive : {}) }}>Varios días</button>
+          </div>
+          {tipo === "single" ? (
+            <input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} style={styles.textInput} />
+          ) : (
+            <div style={styles.formRow}>
+              <input type="date" value={desde} onChange={(e) => setDesde(e.target.value)} placeholder="Desde" style={styles.textInput} />
+              <input type="date" value={hasta} onChange={(e) => setHasta(e.target.value)} placeholder="Hasta" style={styles.textInput} />
+            </div>
+          )}
+          <div style={styles.formRow}>
+            <button onClick={crear} style={styles.addBtn}>+ Crear evento</button>
+            <button onClick={() => { setImportMsg(null); fileRef.current?.click(); }} style={styles.importBtn}>↑ Importar desde Excel</button>
+            <button onClick={descargarPlantillaBlanco} style={styles.smallBtn}>↓ Descargar plantilla</button>
+          </div>
+          <input ref={fileRef} type="file" accept=".xlsx,.xls" onChange={onFile} style={{ display: "none" }} />
+          <div style={styles.dimText}>
+            Elige si el evento es de un solo día o de varios. En "varios días" se crean automáticamente las jornadas del rango. Las ubicaciones y productos se configuran dentro del evento, o impórtalos del Excel.
+          </div>
+          {importMsg && <div style={{ color: COLORS.red, fontSize: 13 }}>{importMsg}</div>}
         </div>
-        <input ref={fileRef} type="file" accept=".xlsx,.xls" onChange={onFile} style={{ display: "none" }} />
-        <div style={styles.dimText}>
-          Importar crea un evento con las ubicaciones y productos del Excel. El nombre y la fecha de arriba se aplican al evento importado; si los dejas vacíos, se usa el nombre del archivo.
-        </div>
-        {importMsg && <div style={{ color: COLORS.red, fontSize: 13 }}>{importMsg}</div>}
-      </div>
       )}
+
+      <div style={{ ...styles.sectionTitle, marginTop: esAdmin ? 30 : 0 }}>Eventos en curso</div>
+      {enCurso.length === 0 && <div style={styles.empty}>{esAdmin ? "No hay eventos en curso. Crea uno arriba." : "No hay eventos en curso."}</div>}
+      <div style={{ display: "grid", gap: 10, marginBottom: 28 }}>
+        {enCurso.map(tarjeta)}
+      </div>
+
+      <div style={styles.sectionTitle}>Eventos pasados</div>
+      {pasados.length === 0 && <div style={styles.empty}>No hay eventos pasados.</div>}
+      <div style={{ display: "grid", gap: 10, marginBottom: 28 }}>
+        {pasados.map(tarjeta)}
+      </div>
     </div>
   );
 }
 
 function EventoDetalle({ evento, role, updateEvento }) {
   const esAdmin = role === "admin";
-  const [tab, setTab] = useState(role === "admin" ? "jornadas" : "conteo");
+  const [tab, setTab] = useState(role === "admin" ? "config" : "conteo");
   const [jornadaActivaId, setJornadaActivaId] = useState(evento.jornadas[0]?.id || null);
   const [ubicActiva, setUbicActiva] = useState(evento.ubicaciones[0] || "");
 
@@ -357,17 +461,19 @@ function EventoDetalle({ evento, role, updateEvento }) {
 
       <nav style={styles.tabs}>
         {(esAdmin
-          ? [["jornadas", "Jornadas"], ["config", "Configuración"], ["conteo", "Conteo"], ["resumen", "Resumen"]]
+          ? [["config", "Configuración"], ["conteo", "Conteo"], ["resumen", "Resumen"]]
           : [["conteo", "Conteo"], ["resumen", "Resumen"]]
         ).map(([k, label]) => (
           <button key={k} onClick={() => setTab(k)} style={{ ...styles.tab, ...(tab === k ? styles.tabActive : {}) }}>{label}</button>
         ))}
       </nav>
 
-      {tab === "jornadas" && (
-        <JornadasView evento={evento} upd={upd} jornadaActivaId={jornadaActivaId} setJornadaActivaId={setJornadaActivaId} />
+      {tab === "config" && (
+        <>
+          <ConfigView evento={evento} upd={upd} />
+          <JornadasView evento={evento} upd={upd} jornadaActivaId={jornadaActivaId} setJornadaActivaId={setJornadaActivaId} />
+        </>
       )}
-      {tab === "config" && <ConfigView evento={evento} upd={upd} />}
       {tab === "conteo" && (
         <ConteoView evento={evento} upd={upd} jornada={jornadaActiva} jornadaActivaId={jornadaActivaId} setJornadaActivaId={setJornadaActivaId} ubicActiva={ubicActiva} setUbicActiva={setUbicActiva} />
       )}
@@ -385,6 +491,7 @@ function emptyJornada(fecha, evento) {
 }
 
 function JornadasView({ evento, upd, jornadaActivaId, setJornadaActivaId }) {
+  const esSingle = evento.tipo === "single";
   const [fecha, setFecha] = useState("");
   const [desde, setDesde] = useState("");
   const [hasta, setHasta] = useState("");
@@ -418,8 +525,8 @@ function JornadasView({ evento, upd, jornadaActivaId, setJornadaActivaId }) {
 
   return (
     <div>
-      <div style={styles.sectionTitle}>Jornadas del evento</div>
-      {evento.jornadas.length === 0 && <div style={styles.empty}>Sin jornadas. Añade noches sueltas o genera un rango de fechas abajo.</div>}
+      <div style={{ ...styles.sectionTitle, marginTop: 34 }}>Jornadas {esSingle ? "(día único)" : "del evento"}</div>
+      {evento.jornadas.length === 0 && <div style={styles.empty}>{esSingle ? "Añade la fecha del día abajo." : "Sin jornadas. Añade noches sueltas o genera un rango de fechas abajo."}</div>}
 
       <div style={{ display: "grid", gap: 8, marginBottom: 24 }}>
         {evento.jornadas.map((j) => (
@@ -430,23 +537,27 @@ function JornadasView({ evento, upd, jornadaActivaId, setJornadaActivaId }) {
         ))}
       </div>
 
-      <div style={styles.formCard}>
-        <div style={styles.formCardTitle}>Añadir una jornada</div>
-        <div style={styles.formRow}>
-          <input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} style={styles.textInput} />
-          <button onClick={() => { addJornada(fecha); setFecha(""); }} style={styles.addBtn}>+ Añadir</button>
+      {(!esSingle || evento.jornadas.length === 0) && (
+        <div style={styles.formCard}>
+          <div style={styles.formCardTitle}>Añadir una jornada</div>
+          <div style={styles.formRow}>
+            <input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} style={styles.textInput} />
+            <button onClick={() => { addJornada(fecha); setFecha(""); }} style={styles.addBtn}>+ Añadir</button>
+          </div>
         </div>
-      </div>
+      )}
 
-      <div style={styles.formCard}>
-        <div style={styles.formCardTitle}>Generar rango de fechas</div>
-        <div style={styles.formRow}>
-          <input type="date" value={desde} onChange={(e) => setDesde(e.target.value)} style={styles.textInput} />
-          <input type="date" value={hasta} onChange={(e) => setHasta(e.target.value)} style={styles.textInput} />
+      {!esSingle && (
+        <div style={styles.formCard}>
+          <div style={styles.formCardTitle}>Generar rango de fechas</div>
+          <div style={styles.formRow}>
+            <input type="date" value={desde} onChange={(e) => setDesde(e.target.value)} style={styles.textInput} />
+            <input type="date" value={hasta} onChange={(e) => setHasta(e.target.value)} style={styles.textInput} />
+          </div>
+          <button onClick={addRango} style={styles.addBtn}>+ Generar todas las jornadas</button>
+          <div style={styles.dimText}>Crea una jornada por cada día entre las dos fechas (incluidas).</div>
         </div>
-        <button onClick={addRango} style={styles.addBtn}>+ Generar todas las jornadas</button>
-        <div style={styles.dimText}>Crea una jornada por cada día entre las dos fechas (incluidas).</div>
-      </div>
+      )}
     </div>
   );
 }
@@ -806,7 +917,7 @@ function Login({ onLogin }) {
   return (
     <div style={{ ...styles.app, display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", minHeight: "100vh" }}>
       <style>{globalCSS}</style>
-      <div style={styles.kicker}>JOTA BELTRÁN</div>
+      <div style={styles.kicker}>J.B.APP</div>
       <h1 style={{ ...styles.title, fontSize: 40, marginBottom: 6 }}>Event<span style={{ color: COLORS.gold }}>rack</span></h1>
       <p style={{ color: COLORS.dim, marginBottom: 22, fontSize: 14 }}>Introduce tu código de acceso</p>
       <div style={{ ...styles.formCard, width: "100%", maxWidth: 320, marginTop: 0 }}>
@@ -933,6 +1044,7 @@ const styles = {
   smallBtn: { background: COLORS.panel, border: `1px solid ${COLORS.line}`, color: COLORS.cream, fontSize: 13, padding: "7px 14px", borderRadius: 7 },
   exportBtn: { background: "transparent", border: `1px solid ${COLORS.gold}`, color: COLORS.gold, fontSize: 13, fontWeight: 600, padding: "8px 14px", borderRadius: 8, whiteSpace: "nowrap" },
   importBtn: { background: "transparent", border: `1px solid ${COLORS.goldDim}`, color: COLORS.cream, fontSize: 14, fontWeight: 600, padding: "9px 18px", borderRadius: 7, whiteSpace: "nowrap" },
+  editBtn: { background: "transparent", border: `1px solid ${COLORS.line}`, color: COLORS.gold, fontSize: 14, lineHeight: 1, padding: "6px 9px", borderRadius: 8 },
   xBtn: { background: "transparent", border: "none", color: COLORS.red, fontSize: 22, lineHeight: 1, padding: "0 6px" },
   xBtnSm: { background: "transparent", border: "none", color: COLORS.red, fontSize: 18, lineHeight: 1, padding: "0 4px" },
 };
