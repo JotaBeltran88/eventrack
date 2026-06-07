@@ -746,17 +746,6 @@ function ConteoView({ evento, upd, jornada, jornadaActivaId, setJornadaActivaId,
 
   const categorias = [...new Set(evento.productos.map((p) => p.categoria))];
 
-  // Totalización de la jornada: suma de inicial, final y consumo de todas las ubicaciones.
-  let totInicial = 0, totFinal = 0, totConsumo = 0;
-  evento.ubicaciones.forEach((u) => {
-    evento.productos.forEach((p) => {
-      const c = getCell(u, p.id);
-      totInicial += c.inicial || 0;
-      totFinal += c.final || 0;
-      totConsumo += Math.max(0, (c.inicial || 0) - (c.final || 0));
-    });
-  });
-
   return (
     <div>
       <JornadaSelector evento={evento} jornadaActivaId={jornadaActivaId} setJornadaActivaId={setJornadaActivaId} />
@@ -764,12 +753,6 @@ function ConteoView({ evento, upd, jornada, jornadaActivaId, setJornadaActivaId,
         {evento.ubicaciones.map((u) => (
           <button key={u} onClick={() => setUbicActiva(u)} style={{ ...styles.chip, ...(u === ubicActiva ? styles.chipActive : {}) }}>{u}</button>
         ))}
-      </div>
-      <div style={styles.totalBar}>
-        <span style={{ color: COLORS.dim, fontSize: 12, width: "100%", marginBottom: 2 }}>Totalización · {fechaLabel(jornada.fecha)} · todas las ubicaciones</span>
-        <div style={styles.totalItem}><span style={styles.totalLabel}>Inicial</span><span style={styles.totalNum}>{totInicial}</span></div>
-        <div style={styles.totalItem}><span style={styles.totalLabel}>Final</span><span style={styles.totalNum}>{totFinal}</span></div>
-        <div style={styles.totalItem}><span style={styles.totalLabel}>Consumo</span><span style={{ ...styles.totalNum, color: COLORS.gold }}>{totConsumo}</span></div>
       </div>
       {categorias.map((cat) => (
         <div key={cat} style={{ marginBottom: 26 }}>
