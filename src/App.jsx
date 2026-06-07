@@ -871,21 +871,42 @@ function nombreSeguro(nombre) {
   return (nombre || "evento").replace(/[^\w\sáéíóúñ-]/gi, "").replace(/\s+/g, "_").slice(0, 40) || "evento";
 }
 
-// Descarga el inventario de UNA jornada (todas las ubicaciones y productos de ese día).
+// Construye la hoja de inventario de UNA jornada en formato cruzado:
+// una fila por producto, y por cada ubicación (más un grupo Total) las
+// columnas Inicial / Final / Consumo, con cabecera de dos niveles.
+function hojaInventarioJornada(evento, jornada) {
+  const ubic = evento.ubicaciones;
+  const grupos = ["Total", ...ubic];
+  const cons = (c) => Math.max(0, (c.inicial || 0) - (c.final || 0));
+  const cel = (u, pid) => jornada.conteo?.[u]?.[pid] || { inicial: 0, final: 0 };
+
+  const fila1 = ["", "", ""];
+  grupos.forEach((g) => fila1.push(g, "", ""));
+  const fila2 = ["Categoría", "Producto", "Unidad"];
+  grupos.forEach(() => fila2.push("Inicial", "Final", "Consumo"));
+
+  const filas = [fila1, fila2];
+  evento.productos.forEach((p) => {
+    const row = [p.categoria, p.nombre, p.unidad];
+    let tIni = 0, tFin = 0, tCon = 0;
+    ubic.forEach((u) => { const c = cel(u, p.id); tIni += c.inicial || 0; tFin += c.final || 0; tCon += cons(c); });
+    row.push(tIni, tFin, tCon);
+    ubic.forEach((u) => { const c = cel(u, p.id); row.push(c.inicial || 0, c.final || 0, cons(c)); });
+    filas.push(row);
+  });
+
+  const ws = XLSX.utils.aoa_to_sheet(filas);
+  // Combinar cada etiqueta de grupo (Total, Barra 1…) sobre sus 3 columnas.
+  ws["!merges"] = grupos.map((g, gi) => ({ s: { r: 0, c: 3 + gi * 3 }, e: { r: 0, c: 3 + gi * 3 + 2 } }));
+  ws["!cols"] = [{ wch: 14 }, { wch: 30 }, { wch: 10 }, ...grupos.flatMap(() => [{ wch: 9 }, { wch: 9 }, { wch: 10 }])];
+  return ws;
+}
+
+// Descarga el inventario de UNA jornada en el formato cruzado.
 function descargarJornadaExcel(evento, jornada) {
   if (!jornada) { alert("Selecciona una jornada para descargar su inventario."); return; }
   const wb = XLSX.utils.book_new();
-  const filas = [];
-  evento.ubicaciones.forEach((u) => evento.productos.forEach((p) => {
-    const c = jornada.conteo?.[u]?.[p.id] || { inicial: 0, final: 0 };
-    filas.push({
-      "Ubicación": u, "Categoría": p.categoria, Producto: p.nombre, Unidad: p.unidad,
-      Inicial: c.inicial || 0, Final: c.final || 0, Consumo: Math.max(0, (c.inicial || 0) - (c.final || 0)),
-    });
-  }));
-  const ws = XLSX.utils.json_to_sheet(filas);
-  ws["!cols"] = [{ wch: 18 }, { wch: 14 }, { wch: 26 }, { wch: 10 }, { wch: 9 }, { wch: 9 }, { wch: 10 }];
-  XLSX.utils.book_append_sheet(wb, ws, "Inventario");
+  XLSX.utils.book_append_sheet(wb, hojaInventarioJornada(evento, jornada), "Inventario");
   XLSX.writeFile(wb, `Eventrack_${nombreSeguro(evento.nombre)}_${jornada.fecha || "sinfecha"}.xlsx`);
 }
 
