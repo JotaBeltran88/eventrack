@@ -1,0 +1,811 @@
+import React, { useState, useEffect, useCallback, useRef } from "react";
+import * as XLSX from "xlsx";
+import { loadState, saveState, subscribeState } from "./storage";
+
+// ─────────────────────────────────────────────────────────────
+//  EVENTRACK · Jota Beltrán
+//  App multi-evento de inventario y control de stock, con JORNADAS.
+//  Configuración común al evento:
+//    · Ubicaciones · Referencias de producto
+//  Por jornada:
+//    · Conteo de inventario (inicial/final → consumo)
+//  Más acumulado del evento completo (suma de jornadas).
+//  Datos compartidos persistentes en la nube (Supabase, ver src/storage.js).
+// ─────────────────────────────────────────────────────────────
+
+const COLORS = {
+  bg: "#0e0b08", panel: "#1a1410", panel2: "#221a13", line: "#3a2c1f",
+  gold: "#d9a441", goldDim: "#8a6a2c", cream: "#f2e8d8", dim: "#9b8a73",
+  green: "#7fae6b", red: "#cc6a55",
+};
+
+function nuevoEvento(nombre, fecha) {
+  return {
+    id: "ev" + Date.now().toString(36),
+    nombre: nombre || "Evento sin nombre",
+    fecha: fecha || "",
+    ubicaciones: [],
+    productos: [],
+    jornadas: [],
+  };
+}
+
+function fechaLabel(iso) {
+  if (!iso) return "Sin fecha";
+  const [y, m, d] = iso.split("-");
+  if (!y || !m || !d) return iso;
+  const dias = ["dom", "lun", "mar", "mié", "jue", "vie", "sáb"];
+  const meses = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
+  const dt = new Date(Number(y), Number(m) - 1, Number(d));
+  return `${dias[dt.getDay()]} ${Number(d)} ${meses[Number(m) - 1]}`;
+}
+
+// ── Lectura de la plantilla Excel ──
+const normTxt = (s) => s.toString().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+
+function leerHojaWB(wb, nombres) {
+  const target = nombres.map(normTxt);
+  const hoja = wb.SheetNames.find((sn) => target.includes(normTxt(sn)));
+  if (!hoja) return [];
+  return XLSX.utils.sheet_to_json(wb.Sheets[hoja], { defval: "" });
+}
+
+function campoFila(fila, alias) {
+  const claves = Object.keys(fila);
+  for (const a of alias) {
+    const k = claves.find((c) => normTxt(c) === normTxt(a));
+    if (k != null && fila[k] !== "") return fila[k].toString().trim();
+  }
+  return "";
+}
+
+// Lee un workbook y devuelve { ubicaciones:[str], productos:[{nombre,categoria,unidad}] }
+function parsearPlantilla(wb) {
+  const ubicaciones = [];
+  leerHojaWB(wb, ["Ubicaciones", "Ubicacion"]).forEach((r) => {
+    const v = campoFila(r, ["Ubicación", "Ubicacion", "Nombre"]);
+    if (v && !ubicaciones.includes(v)) ubicaciones.push(v);
+  });
+  const productos = [];
+  leerHojaWB(wb, ["Productos", "Producto"]).forEach((r) => {
+    const nom = campoFila(r, ["Producto", "Nombre", "Referencia"]);
+    if (!nom) return;
+    productos.push({
+      nombre: nom,
+      categoria: campoFila(r, ["Categoría", "Categoria"]) || "Otros",
+      unidad: campoFila(r, ["Unidad", "Ud"]) || "ud",
+    });
+  });
+  return { ubicaciones, productos };
+}
+
+// Genera y descarga la plantilla en blanco desde el navegador
+function descargarPlantillaBlanco() {
+  const wb = XLSX.utils.book_new();
+  const info = XLSX.utils.aoa_to_sheet([
+    ["EVENTRACK · Plantilla de importación"],
+    ["Rellena las hojas Ubicaciones y Productos."],
+    ["No cambies los nombres de las hojas ni los encabezados de la fila 1."],
+    ["En Eventrack pulsa «Importar desde Excel» al crear un evento o dentro de Configuración."],
+  ]);
+  info["!cols"] = [{ wch: 80 }];
+  XLSX.utils.book_append_sheet(wb, info, "Instrucciones");
+  const u = XLSX.utils.aoa_to_sheet([["Ubicación"]]); u["!cols"] = [{ wch: 30 }];
+  XLSX.utils.book_append_sheet(wb, u, "Ubicaciones");
+  const p = XLSX.utils.aoa_to_sheet([["Producto", "Categoría", "Unidad"]]); p["!cols"] = [{ wch: 32 }, { wch: 20 }, { wch: 16 }];
+  XLSX.utils.book_append_sheet(wb, p, "Productos");
+  XLSX.writeFile(wb, "Eventrack_Plantilla_Importacion.xlsx");
+}
+
+export default function App() {
+  const [loaded, setLoaded] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [eventos, setEventos] = useState([]);
+  const [eventoActivoId, setEventoActivoId] = useState(null);
+
+  // Guarda la última versión sincronizada para no reescribir/recargar en bucle.
+  const lastSynced = useRef("");
+
+  // Carga inicial desde Supabase + suscripción en tiempo real.
+  useEffect(() => {
+    (async () => {
+      try {
+        const data = await loadState();
+        if (data && Array.isArray(data.eventos)) {
+          lastSynced.current = JSON.stringify(data);
+          setEventos(data.eventos);
+        }
+      } catch (e) { /* primera vez o sin conexión */ }
+      setLoaded(true);
+    })();
+
+    const unsub = subscribeState((data) => {
+      if (!data || !Array.isArray(data.eventos)) return;
+      const json = JSON.stringify(data);
+      if (json === lastSynced.current) return; // es nuestro propio cambio, lo ignoramos
+      lastSynced.current = json;
+      setEventos(data.eventos);
+    });
+    return unsub;
+  }, []);
+
+  const save = useCallback(async (next) => {
+    setSaving(true);
+    try { await saveState(next); }
+    catch (e) { console.error("Error guardando", e); }
+    setSaving(false);
+  }, []);
+
+  // Guardado automático (debounced) cuando cambian los datos localmente.
+  useEffect(() => {
+    if (!loaded) return;
+    const payload = { eventos };
+    const json = JSON.stringify(payload);
+    if (json === lastSynced.current) return; // nada nuevo que guardar
+    const t = setTimeout(() => {
+      lastSynced.current = json;
+      save(payload);
+    }, 600);
+    return () => clearTimeout(t);
+  }, [eventos, loaded, save]);
+
+  const updateEvento = (id, updater) =>
+    setEventos((prev) => prev.map((ev) => (ev.id === id ? updater(ev) : ev)));
+  const addEvento = (nombre, fecha) => {
+    const ev = nuevoEvento(nombre, fecha);
+    setEventos((prev) => [...prev, ev]);
+    return ev.id;
+  };
+  const addEventoCompleto = (ev) => {
+    setEventos((prev) => [...prev, ev]);
+    return ev.id;
+  };
+  const removeEvento = (id) => {
+    setEventos((prev) => prev.filter((ev) => ev.id !== id));
+    if (eventoActivoId === id) setEventoActivoId(null);
+  };
+
+  if (!loaded) {
+    return (
+      <div style={{ ...styles.app, justifyContent: "center", alignItems: "center", minHeight: "60vh" }}>
+        <style>{globalCSS}</style>
+        <div style={{ color: COLORS.gold, fontFamily: "'Fraunces', serif", fontSize: 18 }}>Cargando Eventrack…</div>
+      </div>
+    );
+  }
+
+  const eventoActivo = eventos.find((ev) => ev.id === eventoActivoId);
+
+  return (
+    <div style={styles.app}>
+      <style>{globalCSS}</style>
+      <header style={styles.header}>
+        <div>
+          {eventoActivo && (
+            <button onClick={() => setEventoActivoId(null)} style={styles.volverBtn}>‹ Volver a eventos</button>
+          )}
+          <div style={{ cursor: "pointer" }} onClick={() => setEventoActivoId(null)}>
+            <div style={styles.kicker}>JOTA BELTRÁN</div>
+            <h1 style={styles.title}>Event<span style={{ color: COLORS.gold }}>rack</span></h1>
+          </div>
+        </div>
+        <div style={styles.saveTag}>{saving ? "Guardando…" : "Guardado ✓"}</div>
+      </header>
+
+      {!eventoActivo ? (
+        <EventosList eventos={eventos} onOpen={setEventoActivoId} onAdd={addEvento} onAddCompleto={addEventoCompleto} onRemove={removeEvento} />
+      ) : (
+        <EventoDetalle evento={eventoActivo} updateEvento={updateEvento} />
+      )}
+    </div>
+  );
+}
+
+function EventosList({ eventos, onOpen, onAdd, onAddCompleto, onRemove }) {
+  const [nombre, setNombre] = useState("");
+  const [fecha, setFecha] = useState("");
+  const [importMsg, setImportMsg] = useState(null);
+  const fileRef = React.useRef(null);
+
+  const crear = () => {
+    if (!nombre.trim()) return;
+    const id = onAdd(nombre.trim(), fecha);
+    setNombre(""); setFecha("");
+    onOpen(id);
+  };
+
+  const onFile = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImportMsg("Leyendo archivo…");
+    try {
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf, { type: "array" });
+      const { ubicaciones, productos } = parsearPlantilla(wb);
+
+      if (ubicaciones.length === 0 && productos.length === 0) {
+        setImportMsg("No se encontraron datos. Revisa que las hojas se llamen Ubicaciones y Productos.");
+        e.target.value = "";
+        return;
+      }
+
+      const t = Date.now().toString(36);
+      const ev = {
+        id: "ev" + t,
+        nombre: (nombre.trim() || file.name.replace(/\.(xlsx|xls)$/i, "")) || "Evento importado",
+        fecha: fecha || "",
+        ubicaciones,
+        productos: productos.map((p, i) => ({ id: "p" + t + i, ...p })),
+        jornadas: [],
+      };
+      const id = onAddCompleto(ev);
+      setNombre(""); setFecha("");
+      e.target.value = "";
+      onOpen(id);
+    } catch (err) {
+      console.error(err);
+      setImportMsg("No se pudo leer el archivo. Asegúrate de que es un .xlsx válido.");
+      e.target.value = "";
+    }
+  };
+
+  return (
+    <div>
+      <div style={styles.sectionTitle}>Mis eventos</div>
+      {eventos.length === 0 && <div style={styles.empty}>Aún no hay eventos. Crea el primero abajo.</div>}
+
+      <div style={{ display: "grid", gap: 10, marginBottom: 28 }}>
+        {eventos.map((ev) => (
+          <div key={ev.id} style={styles.eventCard} onClick={() => onOpen(ev.id)}>
+            <div style={{ flex: 1 }}>
+              <div style={styles.eventName}>{ev.nombre}</div>
+              <div style={styles.eventMeta}>
+                {ev.fecha ? fechaLabel(ev.fecha) : "Sin fecha"} · {ev.jornadas.length} jornadas ·{" "}
+                {ev.ubicaciones.length} ubic. · {ev.productos.length} referencias
+              </div>
+            </div>
+            <button onClick={(e) => { e.stopPropagation(); if (confirm(`¿Borrar "${ev.nombre}"?`)) onRemove(ev.id); }} style={styles.xBtn}>×</button>
+            <span style={styles.chevron}>›</span>
+          </div>
+        ))}
+      </div>
+
+      <div style={styles.formCard}>
+        <div style={styles.formCardTitle}>Crear nuevo evento</div>
+        <input value={nombre} onChange={(e) => setNombre(e.target.value)} placeholder="Nombre del evento (ej. Noches del Botánico)" style={styles.textInput} />
+        <input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} style={styles.textInput} />
+        <div style={styles.formRow}>
+          <button onClick={crear} style={styles.addBtn}>+ Crear evento</button>
+          <button onClick={() => { setImportMsg(null); fileRef.current?.click(); }} style={styles.importBtn}>↑ Importar desde Excel</button>
+          <button onClick={descargarPlantillaBlanco} style={styles.smallBtn}>↓ Descargar plantilla</button>
+        </div>
+        <input ref={fileRef} type="file" accept=".xlsx,.xls" onChange={onFile} style={{ display: "none" }} />
+        <div style={styles.dimText}>
+          Importar crea un evento con las ubicaciones y productos del Excel. El nombre y la fecha de arriba se aplican al evento importado; si los dejas vacíos, se usa el nombre del archivo.
+        </div>
+        {importMsg && <div style={{ color: COLORS.red, fontSize: 13 }}>{importMsg}</div>}
+      </div>
+    </div>
+  );
+}
+
+function EventoDetalle({ evento, updateEvento }) {
+  const [tab, setTab] = useState("jornadas");
+  const [jornadaActivaId, setJornadaActivaId] = useState(evento.jornadas[0]?.id || null);
+  const [ubicActiva, setUbicActiva] = useState(evento.ubicaciones[0] || "");
+
+  const upd = (updater) => updateEvento(evento.id, updater);
+
+  useEffect(() => {
+    if (!evento.ubicaciones.includes(ubicActiva)) setUbicActiva(evento.ubicaciones[0] || "");
+  }, [evento.ubicaciones, ubicActiva]);
+
+  useEffect(() => {
+    if (jornadaActivaId && !evento.jornadas.find((j) => j.id === jornadaActivaId)) {
+      setJornadaActivaId(evento.jornadas[0]?.id || null);
+    }
+  }, [evento.jornadas, jornadaActivaId]);
+
+  const jornadaActiva = evento.jornadas.find((j) => j.id === jornadaActivaId) || null;
+
+  return (
+    <div>
+      <div style={styles.eventHeader}>
+        <div>
+          <div style={styles.eventTitle}>{evento.nombre}</div>
+          <div style={styles.eventMeta}>{evento.jornadas.length} jornadas · {evento.ubicaciones.length} ubicaciones · {evento.productos.length} referencias</div>
+        </div>
+        <ExportButton evento={evento} />
+      </div>
+
+      <nav style={styles.tabs}>
+        {[
+          ["jornadas", "Jornadas"],
+          ["config", "Configuración"],
+          ["conteo", "Conteo"],
+          ["resumen", "Resumen"],
+        ].map(([k, label]) => (
+          <button key={k} onClick={() => setTab(k)} style={{ ...styles.tab, ...(tab === k ? styles.tabActive : {}) }}>{label}</button>
+        ))}
+      </nav>
+
+      {tab === "jornadas" && (
+        <JornadasView evento={evento} upd={upd} jornadaActivaId={jornadaActivaId} setJornadaActivaId={setJornadaActivaId} />
+      )}
+      {tab === "config" && <ConfigView evento={evento} upd={upd} />}
+      {tab === "conteo" && (
+        <ConteoView evento={evento} upd={upd} jornada={jornadaActiva} jornadaActivaId={jornadaActivaId} setJornadaActivaId={setJornadaActivaId} ubicActiva={ubicActiva} setUbicActiva={setUbicActiva} />
+      )}
+      {tab === "resumen" && <ResumenView evento={evento} />}
+    </div>
+  );
+}
+
+function emptyJornada(fecha, evento) {
+  const conteo = {};
+  evento.ubicaciones.forEach((u) => {
+    conteo[u] = Object.fromEntries(evento.productos.map((p) => [p.id, { inicial: 0, final: 0 }]));
+  });
+  return { id: "j" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), fecha, conteo };
+}
+
+function JornadasView({ evento, upd, jornadaActivaId, setJornadaActivaId }) {
+  const [fecha, setFecha] = useState("");
+  const [desde, setDesde] = useState("");
+  const [hasta, setHasta] = useState("");
+
+  const addJornada = (f) => {
+    if (!f) return;
+    if (evento.jornadas.some((j) => j.fecha === f)) return;
+    const j = emptyJornada(f, evento);
+    upd((ev) => ({ ...ev, jornadas: [...ev.jornadas, j].sort((a, b) => (a.fecha || "").localeCompare(b.fecha || "")) }));
+    setJornadaActivaId(j.id);
+  };
+
+  const addRango = () => {
+    if (!desde || !hasta) return;
+    const start = new Date(desde + "T00:00:00");
+    const end = new Date(hasta + "T00:00:00");
+    if (end < start) return;
+    const nuevas = [];
+    const existentes = new Set(evento.jornadas.map((j) => j.fecha));
+    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+      const iso = d.toISOString().slice(0, 10);
+      if (!existentes.has(iso)) { nuevas.push(emptyJornada(iso, evento)); existentes.add(iso); }
+    }
+    if (nuevas.length) {
+      upd((ev) => ({ ...ev, jornadas: [...ev.jornadas, ...nuevas].sort((a, b) => (a.fecha || "").localeCompare(b.fecha || "")) }));
+    }
+    setDesde(""); setHasta("");
+  };
+
+  const removeJornada = (id) => upd((ev) => ({ ...ev, jornadas: ev.jornadas.filter((j) => j.id !== id) }));
+
+  return (
+    <div>
+      <div style={styles.sectionTitle}>Jornadas del evento</div>
+      {evento.jornadas.length === 0 && <div style={styles.empty}>Sin jornadas. Añade noches sueltas o genera un rango de fechas abajo.</div>}
+
+      <div style={{ display: "grid", gap: 8, marginBottom: 24 }}>
+        {evento.jornadas.map((j) => (
+          <div key={j.id} style={{ ...styles.jornadaRow, ...(j.id === jornadaActivaId ? styles.jornadaRowActive : {}) }} onClick={() => setJornadaActivaId(j.id)}>
+            <span style={{ flex: 1, color: COLORS.cream, fontWeight: 500 }}>{fechaLabel(j.fecha)}</span>
+            <button onClick={(e) => { e.stopPropagation(); removeJornada(j.id); }} style={styles.xBtnSm}>×</button>
+          </div>
+        ))}
+      </div>
+
+      <div style={styles.formCard}>
+        <div style={styles.formCardTitle}>Añadir una jornada</div>
+        <div style={styles.formRow}>
+          <input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} style={styles.textInput} />
+          <button onClick={() => { addJornada(fecha); setFecha(""); }} style={styles.addBtn}>+ Añadir</button>
+        </div>
+      </div>
+
+      <div style={styles.formCard}>
+        <div style={styles.formCardTitle}>Generar rango de fechas</div>
+        <div style={styles.formRow}>
+          <input type="date" value={desde} onChange={(e) => setDesde(e.target.value)} style={styles.textInput} />
+          <input type="date" value={hasta} onChange={(e) => setHasta(e.target.value)} style={styles.textInput} />
+        </div>
+        <button onClick={addRango} style={styles.addBtn}>+ Generar todas las jornadas</button>
+        <div style={styles.dimText}>Crea una jornada por cada día entre las dos fechas (incluidas).</div>
+      </div>
+    </div>
+  );
+}
+
+function ConfigView({ evento, upd }) {
+  const [nuevaUbic, setNuevaUbic] = useState("");
+  const [pNombre, setPNombre] = useState(""); const [pCat, setPCat] = useState(""); const [pUnidad, setPUnidad] = useState("");
+  const [importMsg, setImportMsg] = useState(null);
+  const fileRef = React.useRef(null);
+
+  const onFile = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImportMsg("Leyendo archivo…");
+    try {
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf, { type: "array" });
+      const datos = parsearPlantilla(wb);
+
+      upd((ev) => {
+        const t = Date.now().toString(36);
+        const ubicNuevas = datos.ubicaciones.filter((u) => !ev.ubicaciones.includes(u));
+        const ubicaciones = [...ev.ubicaciones, ...ubicNuevas];
+
+        const existeProd = (nom) => ev.productos.some((p) => normTxt(p.nombre) === normTxt(nom));
+        const prodNuevos = datos.productos
+          .filter((p) => !existeProd(p.nombre))
+          .map((p, i) => ({ id: "p" + t + i, ...p }));
+        const productos = [...ev.productos, ...prodNuevos];
+
+        const jornadas = ev.jornadas.map((j) => {
+          const conteo = { ...j.conteo };
+          ubicNuevas.forEach((u) => {
+            conteo[u] = Object.fromEntries(productos.map((p) => [p.id, { inicial: 0, final: 0 }]));
+          });
+          ev.ubicaciones.forEach((u) => {
+            const base = { ...(conteo[u] || {}) };
+            prodNuevos.forEach((p) => { base[p.id] = base[p.id] || { inicial: 0, final: 0 }; });
+            conteo[u] = base;
+          });
+          return { ...j, conteo };
+        });
+
+        return { ...ev, ubicaciones, productos, jornadas };
+      });
+
+      setImportMsg(`Importado: +${datos.ubicaciones.length} ubic., +${datos.productos.length} prod. (se omiten los repetidos).`);
+      e.target.value = "";
+    } catch (err) {
+      console.error(err);
+      setImportMsg("No se pudo leer el archivo. Asegúrate de que es un .xlsx válido.");
+      e.target.value = "";
+    }
+  };
+
+  const addUbic = () => {
+    const n = nuevaUbic.trim();
+    if (!n || evento.ubicaciones.includes(n)) return;
+    upd((ev) => ({
+      ...ev,
+      ubicaciones: [...ev.ubicaciones, n],
+      jornadas: ev.jornadas.map((j) => ({
+        ...j,
+        conteo: { ...j.conteo, [n]: Object.fromEntries(ev.productos.map((p) => [p.id, { inicial: 0, final: 0 }])) },
+      })),
+    }));
+    setNuevaUbic("");
+  };
+  const removeUbic = (n) => upd((ev) => ({
+    ...ev,
+    ubicaciones: ev.ubicaciones.filter((u) => u !== n),
+    jornadas: ev.jornadas.map((j) => { const c = { ...j.conteo }; delete c[n]; return { ...j, conteo: c }; }),
+  }));
+
+  const addProd = () => {
+    const n = pNombre.trim();
+    if (!n) return;
+    const id = "p" + Date.now().toString(36);
+    const prod = { id, nombre: n, categoria: pCat.trim() || "Otros", unidad: pUnidad.trim() || "ud" };
+    upd((ev) => ({
+      ...ev,
+      productos: [...ev.productos, prod],
+      jornadas: ev.jornadas.map((j) => {
+        const c = { ...j.conteo };
+        ev.ubicaciones.forEach((u) => { c[u] = { ...c[u], [id]: { inicial: 0, final: 0 } }; });
+        return { ...j, conteo: c };
+      }),
+    }));
+    setPNombre(""); setPCat(""); setPUnidad("");
+  };
+  const removeProd = (pid) => upd((ev) => ({
+    ...ev,
+    productos: ev.productos.filter((p) => p.id !== pid),
+    jornadas: ev.jornadas.map((j) => {
+      const c = {};
+      Object.keys(j.conteo).forEach((u) => { c[u] = { ...j.conteo[u] }; delete c[u][pid]; });
+      return { ...j, conteo: c };
+    }),
+  }));
+
+  return (
+    <div>
+      <div style={styles.dimText}>Esta configuración es común a todas las jornadas del evento.</div>
+
+      <div style={{ ...styles.formCard, marginTop: 0 }}>
+        <div style={styles.formCardTitle}>Importar desde Excel</div>
+        <div style={styles.dimText}>Añade ubicaciones y productos desde la plantilla. No duplica lo que ya exista en el evento.</div>
+        <div style={styles.formRow}>
+          <button onClick={() => { setImportMsg(null); fileRef.current?.click(); }} style={styles.importBtn}>↑ Importar Excel</button>
+          <button onClick={descargarPlantillaBlanco} style={styles.smallBtn}>↓ Descargar plantilla</button>
+        </div>
+        <input ref={fileRef} type="file" accept=".xlsx,.xls" onChange={onFile} style={{ display: "none" }} />
+        {importMsg && <div style={{ color: COLORS.green, fontSize: 13 }}>{importMsg}</div>}
+      </div>
+
+      <div style={styles.sectionTitle}>Ubicaciones</div>
+      <div style={styles.chipWrap}>
+        {evento.ubicaciones.map((u) => (
+          <span key={u} style={styles.chipEdit}>{u}<button onClick={() => removeUbic(u)} style={styles.xBtnSm}>×</button></span>
+        ))}
+        {evento.ubicaciones.length === 0 && <span style={styles.dimText}>Sin ubicaciones todavía</span>}
+      </div>
+      <div style={styles.formRow}>
+        <input value={nuevaUbic} onChange={(e) => setNuevaUbic(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addUbic()} placeholder="Nueva ubicación" style={styles.textInput} />
+        <button onClick={addUbic} style={styles.addBtn}>+ Añadir</button>
+      </div>
+
+      <div style={{ ...styles.sectionTitle, marginTop: 34 }}>Referencias de producto</div>
+      {evento.productos.map((p) => (
+        <div key={p.id} style={styles.listRow}>
+          <span style={{ flex: 1, color: COLORS.cream }}>{p.nombre}</span>
+          <span style={styles.metaTag}>{p.categoria} · {p.unidad}</span>
+          <button onClick={() => removeProd(p.id)} style={styles.xBtnSm}>×</button>
+        </div>
+      ))}
+      {evento.productos.length === 0 && <div style={styles.dimText}>Sin referencias todavía</div>}
+      <div style={styles.formCard}>
+        <input value={pNombre} onChange={(e) => setPNombre(e.target.value)} placeholder="Nombre del producto" style={styles.textInput} />
+        <div style={styles.formRow}>
+          <input value={pCat} onChange={(e) => setPCat(e.target.value)} placeholder="Categoría" style={styles.textInput} />
+          <input value={pUnidad} onChange={(e) => setPUnidad(e.target.value)} placeholder="Unidad" style={styles.textInput} />
+        </div>
+        <button onClick={addProd} style={styles.addBtn}>+ Añadir producto</button>
+      </div>
+    </div>
+  );
+}
+
+function JornadaSelector({ evento, jornadaActivaId, setJornadaActivaId }) {
+  if (evento.jornadas.length === 0) return null;
+  return (
+    <div style={styles.chipWrap}>
+      {evento.jornadas.map((j) => (
+        <button key={j.id} onClick={() => setJornadaActivaId(j.id)} style={{ ...styles.chip, ...(j.id === jornadaActivaId ? styles.chipActive : {}) }}>
+          {fechaLabel(j.fecha)}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function ConteoView({ evento, upd, jornada, jornadaActivaId, setJornadaActivaId, ubicActiva, setUbicActiva }) {
+  if (evento.ubicaciones.length === 0 || evento.productos.length === 0)
+    return <div style={styles.empty}>Necesitas ubicaciones y referencias (Configuración) para el conteo.</div>;
+  if (evento.jornadas.length === 0)
+    return <div style={styles.empty}>Crea al menos una jornada para registrar el conteo.</div>;
+  if (!jornada) return (<div><JornadaSelector evento={evento} jornadaActivaId={jornadaActivaId} setJornadaActivaId={setJornadaActivaId} /><div style={styles.empty}>Selecciona una jornada.</div></div>);
+
+  const getCell = (ubic, pid) => jornada.conteo?.[ubic]?.[pid] || { inicial: 0, final: 0 };
+  const setValor = (pid, campo, valor) => {
+    const v = valor === "" ? 0 : Math.max(0, Number(valor));
+    upd((ev) => ({
+      ...ev,
+      jornadas: ev.jornadas.map((j) => {
+        if (j.id !== jornada.id) return j;
+        const conteo = { ...j.conteo };
+        const ubic = { ...(conteo[ubicActiva] || {}) };
+        ubic[pid] = { ...(ubic[pid] || { inicial: 0, final: 0 }), [campo]: v };
+        conteo[ubicActiva] = ubic;
+        return { ...j, conteo };
+      }),
+    }));
+  };
+
+  const categorias = [...new Set(evento.productos.map((p) => p.categoria))];
+  let totalConsumo = 0;
+  evento.productos.forEach((p) => { const c = getCell(ubicActiva, p.id); totalConsumo += Math.max(0, c.inicial - c.final); });
+
+  return (
+    <div>
+      <JornadaSelector evento={evento} jornadaActivaId={jornadaActivaId} setJornadaActivaId={setJornadaActivaId} />
+      <div style={styles.chipWrap}>
+        {evento.ubicaciones.map((u) => (
+          <button key={u} onClick={() => setUbicActiva(u)} style={{ ...styles.chip, ...(u === ubicActiva ? styles.chipActive : {}) }}>{u}</button>
+        ))}
+      </div>
+      <div style={styles.summaryBar}>
+        <span style={{ color: COLORS.dim }}>{fechaLabel(jornada.fecha)} ·</span>
+        <strong style={{ color: COLORS.cream }}>{ubicActiva}</strong>
+        <span style={styles.bigNum}>{totalConsumo}</span>
+        <span style={{ color: COLORS.dim, fontSize: 13 }}>uds.</span>
+      </div>
+      {categorias.map((cat) => (
+        <div key={cat} style={{ marginBottom: 26 }}>
+          <div style={styles.catTitle}>{cat}</div>
+          <div style={styles.tableHead}>
+            <span style={{ flex: 2 }}>Producto</span>
+            <span style={styles.colNum}>Inicial</span><span style={styles.colNum}>Final</span><span style={styles.colNum}>Consumo</span>
+          </div>
+          {evento.productos.filter((p) => p.categoria === cat).map((p) => {
+            const c = getCell(ubicActiva, p.id);
+            const consumo = Math.max(0, c.inicial - c.final);
+            return (
+              <div key={p.id} style={styles.row}>
+                <span style={{ flex: 2 }}><span style={{ color: COLORS.cream }}>{p.nombre}</span><span style={styles.unidad}> · {p.unidad}</span></span>
+                <input type="number" min="0" value={c.inicial || ""} placeholder="0" onChange={(e) => setValor(p.id, "inicial", e.target.value)} style={styles.input} />
+                <input type="number" min="0" value={c.final || ""} placeholder="0" onChange={(e) => setValor(p.id, "final", e.target.value)} style={styles.input} />
+                <span style={{ ...styles.colNum, color: consumo > 0 ? COLORS.gold : COLORS.dim, fontWeight: 600 }}>{consumo}</span>
+              </div>
+            );
+          })}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ResumenView({ evento }) {
+  if (evento.jornadas.length === 0) return <div style={styles.empty}>Sin jornadas todavía.</div>;
+  if (evento.productos.length === 0) return <div style={styles.empty}>Sin referencias todavía.</div>;
+
+  const consumoProd = (pid) => evento.jornadas.reduce((acc, j) => {
+    return acc + evento.ubicaciones.reduce((a, u) => {
+      const c = j.conteo?.[u]?.[pid] || { inicial: 0, final: 0 };
+      return a + Math.max(0, c.inicial - c.final);
+    }, 0);
+  }, 0);
+
+  const consumoJornada = (j) => evento.ubicaciones.reduce((a, u) => {
+    return a + evento.productos.reduce((aa, p) => {
+      const c = j.conteo?.[u]?.[p.id] || { inicial: 0, final: 0 };
+      return aa + Math.max(0, c.inicial - c.final);
+    }, 0);
+  }, 0);
+
+  const totalEvento = evento.productos.reduce((a, p) => a + consumoProd(p.id), 0);
+  const jornadasTot = evento.jornadas.map((j) => ({ j, total: consumoJornada(j) }));
+  const maxJ = Math.max(1, ...jornadasTot.map((x) => x.total));
+
+  return (
+    <div>
+      <div style={styles.summaryBar}>
+        <span style={{ color: COLORS.dim }}>Consumo total del evento</span>
+        <span style={styles.bigNum}>{totalEvento}</span>
+        <span style={{ color: COLORS.dim, fontSize: 13 }}>uds. · {evento.jornadas.length} jornadas</span>
+      </div>
+
+      <div style={styles.catTitle}>Consumo por jornada</div>
+      <div style={{ marginBottom: 28 }}>
+        {jornadasTot.map(({ j, total }) => (
+          <div key={j.id} style={{ marginBottom: 12 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+              <span style={{ color: COLORS.cream, fontSize: 14 }}>{fechaLabel(j.fecha)}</span>
+              <span style={{ color: COLORS.gold, fontWeight: 600 }}>{total}</span>
+            </div>
+            <div style={styles.barTrack}><div style={{ ...styles.barFill, width: `${(total / maxJ) * 100}%` }} /></div>
+          </div>
+        ))}
+      </div>
+
+      <div style={styles.catTitle}>Total acumulado por producto</div>
+      <div style={{ overflowX: "auto" }}>
+        <table style={styles.matrix}>
+          <thead><tr>
+            <th style={{ ...styles.th, textAlign: "left" }}>Producto</th>
+            <th style={styles.th}>Unidad</th>
+            <th style={{ ...styles.th, color: COLORS.gold }}>Consumo total</th>
+          </tr></thead>
+          <tbody>
+            {evento.productos.map((p) => (
+              <tr key={p.id}>
+                <td style={{ ...styles.td, textAlign: "left", color: COLORS.cream }}>{p.nombre}</td>
+                <td style={{ ...styles.td, color: COLORS.dim }}>{p.unidad}</td>
+                <td style={{ ...styles.td, color: COLORS.gold, fontWeight: 600 }}>{consumoProd(p.id)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function ExportButton({ evento }) {
+  const exportar = () => {
+    const wb = XLSX.utils.book_new();
+    const cons = (j, u, pid) => { const c = j.conteo?.[u]?.[pid] || { inicial: 0, final: 0 }; return Math.max(0, c.inicial - c.final); };
+
+    if (evento.jornadas.length) {
+      const filas = evento.jornadas.map((j) => {
+        const consumo = evento.ubicaciones.reduce((a, u) => a + evento.productos.reduce((aa, p) => aa + cons(j, u, p.id), 0), 0);
+        return { Jornada: j.fecha || "(sin fecha)", "Consumo total": consumo };
+      });
+      const ws = XLSX.utils.json_to_sheet(filas);
+      ws["!cols"] = [{ wch: 14 }, { wch: 14 }];
+      XLSX.utils.book_append_sheet(wb, ws, "Resumen jornadas");
+    }
+
+    const detalle = [];
+    evento.jornadas.forEach((j) => evento.ubicaciones.forEach((u) => evento.productos.forEach((p) => {
+      const c = j.conteo?.[u]?.[p.id] || { inicial: 0, final: 0 };
+      detalle.push({ Jornada: j.fecha, "Ubicación": u, "Categoría": p.categoria, Producto: p.nombre, Unidad: p.unidad, Inicial: c.inicial, Final: c.final, Consumo: Math.max(0, c.inicial - c.final) });
+    })));
+    if (detalle.length) {
+      const ws = XLSX.utils.json_to_sheet(detalle);
+      ws["!cols"] = [{ wch: 12 }, { wch: 18 }, { wch: 14 }, { wch: 26 }, { wch: 10 }, { wch: 9 }, { wch: 9 }, { wch: 10 }];
+      XLSX.utils.book_append_sheet(wb, ws, "Detalle inventario");
+    }
+
+    if (evento.productos.length) {
+      const acc = evento.productos.map((p) => {
+        const total = evento.jornadas.reduce((a, j) => a + evento.ubicaciones.reduce((aa, u) => aa + cons(j, u, p.id), 0), 0);
+        return { Producto: p.nombre, "Categoría": p.categoria, Unidad: p.unidad, "Consumo total evento": total };
+      });
+      const ws = XLSX.utils.json_to_sheet(acc);
+      ws["!cols"] = [{ wch: 26 }, { wch: 14 }, { wch: 10 }, { wch: 20 }];
+      XLSX.utils.book_append_sheet(wb, ws, "Acumulado producto");
+    }
+
+    if (wb.SheetNames.length === 0) { alert("No hay datos que exportar todavía."); return; }
+    const safe = evento.nombre.replace(/[^\w\sáéíóúñ-]/gi, "").replace(/\s+/g, "_").slice(0, 40);
+    XLSX.writeFile(wb, `Eventrack_${safe || "evento"}.xlsx`);
+  };
+
+  return <button onClick={exportar} style={styles.exportBtn}>↓ Exportar Excel</button>;
+}
+
+const globalCSS = `
+  @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,900&family=Outfit:wght@300;400;500;600&display=swap');
+  * { box-sizing: border-box; }
+  input[type=number]::-webkit-inner-spin-button { opacity: 0.3; }
+  input:focus { outline: none; border-color: ${COLORS.gold} !important; }
+  button { cursor: pointer; font-family: 'Outfit', sans-serif; }
+  ::placeholder { color: ${COLORS.goldDim}; }
+`;
+
+const styles = {
+  app: { fontFamily: "'Outfit', sans-serif", background: COLORS.bg, backgroundImage: `radial-gradient(circle at 100% 0%, ${COLORS.panel2} 0%, transparent 45%)`, color: COLORS.cream, minHeight: "100vh", padding: "28px 22px 60px", maxWidth: 880, margin: "0 auto" },
+  header: { display: "flex", justifyContent: "space-between", alignItems: "flex-end", borderBottom: `1px solid ${COLORS.line}`, paddingBottom: 18, marginBottom: 22 },
+  kicker: { fontSize: 11, letterSpacing: "0.22em", color: COLORS.goldDim, fontWeight: 500, marginBottom: 6 },
+  title: { fontFamily: "'Fraunces', serif", fontSize: 34, fontWeight: 900, margin: 0, color: COLORS.cream, letterSpacing: "-0.01em" },
+  saveTag: { fontSize: 12, color: COLORS.goldDim, fontWeight: 500, whiteSpace: "nowrap" },
+  volverBtn: { background: "transparent", border: `1px solid ${COLORS.line}`, color: COLORS.gold, fontSize: 13, fontWeight: 500, padding: "5px 12px", borderRadius: 18, marginBottom: 8 },
+  sectionTitle: { fontFamily: "'Fraunces', serif", fontSize: 22, fontWeight: 600, color: COLORS.cream, marginBottom: 16 },
+  empty: { background: COLORS.panel, border: `1px solid ${COLORS.line}`, borderRadius: 12, padding: 24, color: COLORS.dim, textAlign: "center", fontSize: 14 },
+  dimText: { color: COLORS.dim, fontSize: 13, fontStyle: "italic", marginBottom: 8, display: "block" },
+  eventCard: { display: "flex", alignItems: "center", gap: 10, background: COLORS.panel, border: `1px solid ${COLORS.line}`, borderRadius: 12, padding: "16px 18px", cursor: "pointer" },
+  eventName: { fontFamily: "'Fraunces', serif", fontSize: 18, fontWeight: 600, color: COLORS.cream },
+  eventMeta: { fontSize: 12.5, color: COLORS.dim, marginTop: 3 },
+  chevron: { color: COLORS.gold, fontSize: 22, fontWeight: 300 },
+  eventHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 20 },
+  eventTitle: { fontFamily: "'Fraunces', serif", fontSize: 26, fontWeight: 900, color: COLORS.cream },
+  tabs: { display: "flex", gap: 4, marginBottom: 26, flexWrap: "wrap" },
+  tab: { background: "transparent", border: "none", color: COLORS.dim, fontSize: 14, fontWeight: 500, padding: "8px 14px", borderRadius: 8 },
+  tabActive: { background: COLORS.panel, color: COLORS.gold },
+  chipWrap: { display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 18, alignItems: "center" },
+  chip: { background: COLORS.panel, border: `1px solid ${COLORS.line}`, color: COLORS.dim, padding: "7px 15px", borderRadius: 20, fontSize: 13, fontWeight: 500 },
+  chipActive: { background: COLORS.gold, color: COLORS.bg, borderColor: COLORS.gold },
+  chipEdit: { background: COLORS.panel, border: `1px solid ${COLORS.line}`, color: COLORS.cream, padding: "6px 8px 6px 14px", borderRadius: 20, fontSize: 13, display: "inline-flex", alignItems: "center", gap: 4 },
+  jornadaRow: { display: "flex", alignItems: "center", gap: 10, background: COLORS.panel, border: `1px solid ${COLORS.line}`, borderRadius: 10, padding: "12px 14px", cursor: "pointer" },
+  jornadaRowActive: { borderColor: COLORS.gold, background: COLORS.panel2 },
+  summaryBar: { background: COLORS.panel, border: `1px solid ${COLORS.line}`, borderRadius: 12, padding: "16px 20px", marginBottom: 20, display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" },
+  bigNum: { fontFamily: "'Fraunces', serif", fontSize: 30, fontWeight: 900, color: COLORS.gold, marginLeft: 4, marginRight: 4 },
+  catTitle: { fontFamily: "'Fraunces', serif", fontSize: 18, fontWeight: 600, color: COLORS.gold, marginBottom: 12, paddingBottom: 6, borderBottom: `1px solid ${COLORS.line}` },
+  tableHead: { display: "flex", alignItems: "center", fontSize: 11, letterSpacing: "0.08em", color: COLORS.dim, textTransform: "uppercase", padding: "0 4px 8px" },
+  colNum: { width: 78, textAlign: "center" },
+  row: { display: "flex", alignItems: "center", padding: "8px 4px", borderBottom: `1px solid ${COLORS.panel2}` },
+  unidad: { color: COLORS.dim, fontSize: 12 },
+  input: { width: 78, textAlign: "center", background: COLORS.panel2, border: `1px solid ${COLORS.line}`, borderRadius: 7, color: COLORS.cream, fontSize: 14, padding: "7px 4px", fontFamily: "'Outfit', sans-serif" },
+  barTrack: { height: 10, background: COLORS.panel2, borderRadius: 6, overflow: "hidden" },
+  barFill: { height: "100%", background: `linear-gradient(90deg, ${COLORS.goldDim}, ${COLORS.gold})`, borderRadius: 6, transition: "width .4s" },
+  matrix: { width: "100%", borderCollapse: "collapse", fontSize: 13 },
+  th: { padding: "10px 8px", textAlign: "center", color: COLORS.dim, fontWeight: 500, fontSize: 11, textTransform: "uppercase", letterSpacing: "0.06em", borderBottom: `1px solid ${COLORS.line}` },
+  td: { padding: "9px 8px", textAlign: "center", borderBottom: `1px solid ${COLORS.panel2}` },
+  listRow: { display: "flex", alignItems: "center", gap: 10, padding: "10px 4px", borderBottom: `1px solid ${COLORS.panel2}` },
+  metaTag: { color: COLORS.dim, fontSize: 12.5 },
+  formRow: { display: "flex", gap: 8, flexWrap: "wrap" },
+  formCard: { background: COLORS.panel, border: `1px solid ${COLORS.line}`, borderRadius: 12, padding: 16, marginTop: 14, marginBottom: 14, display: "flex", flexDirection: "column", gap: 10 },
+  formCardTitle: { fontFamily: "'Fraunces', serif", fontSize: 16, fontWeight: 600, color: COLORS.gold },
+  textInput: { flex: 1, minWidth: 120, background: COLORS.panel2, border: `1px solid ${COLORS.line}`, borderRadius: 7, color: COLORS.cream, fontSize: 14, padding: "9px 12px", fontFamily: "'Outfit', sans-serif" },
+  addBtn: { background: COLORS.gold, border: "none", color: COLORS.bg, fontWeight: 600, fontSize: 14, padding: "9px 18px", borderRadius: 7, whiteSpace: "nowrap" },
+  smallBtn: { background: COLORS.panel, border: `1px solid ${COLORS.line}`, color: COLORS.cream, fontSize: 13, padding: "7px 14px", borderRadius: 7 },
+  exportBtn: { background: "transparent", border: `1px solid ${COLORS.gold}`, color: COLORS.gold, fontSize: 13, fontWeight: 600, padding: "8px 14px", borderRadius: 8, whiteSpace: "nowrap" },
+  importBtn: { background: "transparent", border: `1px solid ${COLORS.goldDim}`, color: COLORS.cream, fontSize: 14, fontWeight: 600, padding: "9px 18px", borderRadius: 7, whiteSpace: "nowrap" },
+  xBtn: { background: "transparent", border: "none", color: COLORS.red, fontSize: 22, lineHeight: 1, padding: "0 6px" },
+  xBtnSm: { background: "transparent", border: "none", color: COLORS.red, fontSize: 18, lineHeight: 1, padding: "0 4px" },
+};
