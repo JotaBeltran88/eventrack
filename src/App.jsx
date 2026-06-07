@@ -815,6 +815,7 @@ function ConteoView({ evento, upd, jornada, jornadaActivaId, setJornadaActivaId,
 
       <button onClick={guardar} style={styles.continueBtn}>Guardar</button>
       {guardado && <div style={{ color: COLORS.green, fontSize: 13, textAlign: "center", marginTop: 8 }}>Guardado ✓</div>}
+      <button onClick={() => descargarJornadaExcel(evento, jornada)} style={{ ...styles.smallBtn, width: "100%", marginTop: 10 }}>↓ Descargar inventario del día (Excel)</button>
     </div>
   );
 }
@@ -835,7 +836,8 @@ function ResumenView({ evento }) {
 
   return (
     <div>
-      <div style={styles.dimText}>Total por referencia, sumando todas las jornadas y ubicaciones del evento. Pulsa «Exportar Excel» (arriba) para descargar y tratar estos datos.</div>
+      <div style={styles.dimText}>Total por referencia, sumando todas las jornadas y ubicaciones del evento.</div>
+      <button onClick={() => descargarResumenExcel(evento)} style={{ ...styles.exportBtn, marginBottom: 18 }}>↓ Descargar resumen (Excel)</button>
       <div style={{ overflowX: "auto" }}>
         <table style={styles.matrix}>
           <thead><tr>
@@ -863,6 +865,45 @@ function ResumenView({ evento }) {
       </div>
     </div>
   );
+}
+
+function nombreSeguro(nombre) {
+  return (nombre || "evento").replace(/[^\w\sáéíóúñ-]/gi, "").replace(/\s+/g, "_").slice(0, 40) || "evento";
+}
+
+// Descarga el inventario de UNA jornada (todas las ubicaciones y productos de ese día).
+function descargarJornadaExcel(evento, jornada) {
+  if (!jornada) { alert("Selecciona una jornada para descargar su inventario."); return; }
+  const wb = XLSX.utils.book_new();
+  const filas = [];
+  evento.ubicaciones.forEach((u) => evento.productos.forEach((p) => {
+    const c = jornada.conteo?.[u]?.[p.id] || { inicial: 0, final: 0 };
+    filas.push({
+      "Ubicación": u, "Categoría": p.categoria, Producto: p.nombre, Unidad: p.unidad,
+      Inicial: c.inicial || 0, Final: c.final || 0, Consumo: Math.max(0, (c.inicial || 0) - (c.final || 0)),
+    });
+  }));
+  const ws = XLSX.utils.json_to_sheet(filas);
+  ws["!cols"] = [{ wch: 18 }, { wch: 14 }, { wch: 26 }, { wch: 10 }, { wch: 9 }, { wch: 9 }, { wch: 10 }];
+  XLSX.utils.book_append_sheet(wb, ws, "Inventario");
+  XLSX.writeFile(wb, `Eventrack_${nombreSeguro(evento.nombre)}_${jornada.fecha || "sinfecha"}.xlsx`);
+}
+
+// Descarga el resumen total por referencia (suma de todas las jornadas y ubicaciones).
+function descargarResumenExcel(evento) {
+  const wb = XLSX.utils.book_new();
+  const filas = evento.productos.map((p) => {
+    let ini = 0, fin = 0, con = 0;
+    evento.jornadas.forEach((j) => evento.ubicaciones.forEach((u) => {
+      const c = j.conteo?.[u]?.[p.id] || { inicial: 0, final: 0 };
+      ini += c.inicial || 0; fin += c.final || 0; con += Math.max(0, (c.inicial || 0) - (c.final || 0));
+    }));
+    return { Producto: p.nombre, "Categoría": p.categoria, Unidad: p.unidad, "Inicial total": ini, "Final total": fin, "Consumo total": con };
+  });
+  const ws = XLSX.utils.json_to_sheet(filas);
+  ws["!cols"] = [{ wch: 26 }, { wch: 14 }, { wch: 10 }, { wch: 12 }, { wch: 12 }, { wch: 14 }];
+  XLSX.utils.book_append_sheet(wb, ws, "Total por referencia");
+  XLSX.writeFile(wb, `Eventrack_${nombreSeguro(evento.nombre)}_resumen.xlsx`);
 }
 
 function ExportButton({ evento }) {
