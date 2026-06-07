@@ -182,6 +182,9 @@ export default function App() {
     setSaving(false);
   }, []);
 
+  // Guardado manual inmediato (botón "Guardar").
+  const guardarAhora = useCallback(() => save({ eventos }), [save, eventos]);
+
   // Guardado automático (debounced) cuando cambian los datos localmente.
   useEffect(() => {
     if (!loaded) return;
@@ -263,7 +266,7 @@ export default function App() {
       ) : !eventoActivo ? (
         <EventosList eventos={eventos} role={role} onOpen={setEventoActivoId} onAddCompleto={addEventoCompleto} onRemove={removeEvento} updateEvento={updateEvento} />
       ) : (
-        <EventoDetalle evento={eventoActivo} role={role} updateEvento={updateEvento} />
+        <EventoDetalle evento={eventoActivo} role={role} updateEvento={updateEvento} onGuardar={guardarAhora} />
       )}
     </div>
   );
@@ -400,7 +403,7 @@ function EventosList({ eventos, role, onOpen, onAddCompleto, onRemove, updateEve
   );
 }
 
-function EventoDetalle({ evento, role, updateEvento }) {
+function EventoDetalle({ evento, role, updateEvento, onGuardar }) {
   const esAdmin = role === "admin";
   const [modo, setModo] = useState(esAdmin && !evento.configurado ? "config" : "operar");
   const [tab, setTab] = useState("conteo");
@@ -464,7 +467,7 @@ function EventoDetalle({ evento, role, updateEvento }) {
       </nav>
 
       {tab === "conteo" && (
-        <ConteoView evento={evento} upd={upd} jornada={jornadaActiva} jornadaActivaId={jornadaActivaId} setJornadaActivaId={setJornadaActivaId} ubicActiva={ubicActiva} setUbicActiva={setUbicActiva} />
+        <ConteoView evento={evento} upd={upd} jornada={jornadaActiva} jornadaActivaId={jornadaActivaId} setJornadaActivaId={setJornadaActivaId} ubicActiva={ubicActiva} setUbicActiva={setUbicActiva} onGuardar={onGuardar} />
       )}
       {tab === "resumen" && <ResumenView evento={evento} />}
     </div>
@@ -721,8 +724,9 @@ function JornadaSelector({ evento, jornadaActivaId, setJornadaActivaId }) {
   );
 }
 
-function ConteoView({ evento, upd, jornada, jornadaActivaId, setJornadaActivaId, ubicActiva, setUbicActiva }) {
+function ConteoView({ evento, upd, jornada, jornadaActivaId, setJornadaActivaId, ubicActiva, setUbicActiva, onGuardar }) {
   const [catActiva, setCatActiva] = useState("");
+  const [guardado, setGuardado] = useState(false);
   if (evento.ubicaciones.length === 0 || evento.productos.length === 0)
     return <div style={styles.empty}>Necesitas ubicaciones y referencias (Configuración) para el conteo.</div>;
   if (evento.jornadas.length === 0)
@@ -746,7 +750,13 @@ function ConteoView({ evento, upd, jornada, jornadaActivaId, setJornadaActivaId,
   };
 
   const categorias = [...new Set(evento.productos.map((p) => p.categoria))];
-  const catSel = categorias.includes(catActiva) ? catActiva : (categorias[0] || "");
+  const catSel = categorias.includes(catActiva) ? catActiva : "";
+
+  const guardar = async () => {
+    if (onGuardar) await onGuardar();
+    setGuardado(true);
+    setTimeout(() => setGuardado(false), 2500);
+  };
 
   return (
     <div>
@@ -760,30 +770,38 @@ function ConteoView({ evento, upd, jornada, jornadaActivaId, setJornadaActivaId,
       <div style={{ marginBottom: 18 }}>
         <label style={{ ...styles.fieldLabel, display: "block", marginBottom: 6 }}>Familia de productos</label>
         <select value={catSel} onChange={(e) => setCatActiva(e.target.value)} style={styles.select}>
+          <option value="">— Selecciona una familia —</option>
           {categorias.map((cat) => (
             <option key={cat} value={cat}>{cat}</option>
           ))}
         </select>
       </div>
 
-      <div style={{ marginBottom: 26 }}>
-        <div style={styles.tableHead}>
-          <span style={{ flex: 2 }}>Producto</span>
-          <span style={styles.colNum}>Inicial</span><span style={styles.colNum}>Final</span><span style={styles.colNum}>Consumo</span>
+      {!catSel ? (
+        <div style={styles.empty}>Elige una familia de productos para ver sus referencias.</div>
+      ) : (
+        <div style={{ marginBottom: 26 }}>
+          <div style={styles.tableHead}>
+            <span style={{ flex: 2 }}>Producto</span>
+            <span style={styles.colNum}>Inicial</span><span style={styles.colNum}>Final</span><span style={styles.colNum}>Consumo</span>
+          </div>
+          {evento.productos.filter((p) => p.categoria === catSel).map((p) => {
+            const c = getCell(ubicActiva, p.id);
+            const consumo = Math.max(0, c.inicial - c.final);
+            return (
+              <div key={p.id} style={styles.row}>
+                <span style={{ flex: 2 }}><span style={{ color: COLORS.cream }}>{p.nombre}</span><span style={styles.unidad}> · {p.unidad}</span></span>
+                <input type="number" min="0" value={c.inicial || ""} placeholder="0" onChange={(e) => setValor(p.id, "inicial", e.target.value)} style={styles.input} />
+                <input type="number" min="0" value={c.final || ""} placeholder="0" onChange={(e) => setValor(p.id, "final", e.target.value)} style={styles.input} />
+                <span style={{ ...styles.colNum, color: consumo > 0 ? COLORS.gold : COLORS.dim, fontWeight: 600 }}>{consumo}</span>
+              </div>
+            );
+          })}
         </div>
-        {evento.productos.filter((p) => p.categoria === catSel).map((p) => {
-          const c = getCell(ubicActiva, p.id);
-          const consumo = Math.max(0, c.inicial - c.final);
-          return (
-            <div key={p.id} style={styles.row}>
-              <span style={{ flex: 2 }}><span style={{ color: COLORS.cream }}>{p.nombre}</span><span style={styles.unidad}> · {p.unidad}</span></span>
-              <input type="number" min="0" value={c.inicial || ""} placeholder="0" onChange={(e) => setValor(p.id, "inicial", e.target.value)} style={styles.input} />
-              <input type="number" min="0" value={c.final || ""} placeholder="0" onChange={(e) => setValor(p.id, "final", e.target.value)} style={styles.input} />
-              <span style={{ ...styles.colNum, color: consumo > 0 ? COLORS.gold : COLORS.dim, fontWeight: 600 }}>{consumo}</span>
-            </div>
-          );
-        })}
-      </div>
+      )}
+
+      <button onClick={guardar} style={styles.continueBtn}>Guardar</button>
+      {guardado && <div style={{ color: COLORS.green, fontSize: 13, textAlign: "center", marginTop: 8 }}>Guardado ✓</div>}
     </div>
   );
 }
@@ -792,61 +810,41 @@ function ResumenView({ evento }) {
   if (evento.jornadas.length === 0) return <div style={styles.empty}>Sin jornadas todavía.</div>;
   if (evento.productos.length === 0) return <div style={styles.empty}>Sin referencias todavía.</div>;
 
-  const consumoProd = (pid) => evento.jornadas.reduce((acc, j) => {
-    return acc + evento.ubicaciones.reduce((a, u) => {
+  // Totales por referencia, sumando todas las jornadas y ubicaciones.
+  const totalRef = (pid) => {
+    let ini = 0, fin = 0, con = 0;
+    evento.jornadas.forEach((j) => evento.ubicaciones.forEach((u) => {
       const c = j.conteo?.[u]?.[pid] || { inicial: 0, final: 0 };
-      return a + Math.max(0, c.inicial - c.final);
-    }, 0);
-  }, 0);
-
-  const consumoJornada = (j) => evento.ubicaciones.reduce((a, u) => {
-    return a + evento.productos.reduce((aa, p) => {
-      const c = j.conteo?.[u]?.[p.id] || { inicial: 0, final: 0 };
-      return aa + Math.max(0, c.inicial - c.final);
-    }, 0);
-  }, 0);
-
-  const totalEvento = evento.productos.reduce((a, p) => a + consumoProd(p.id), 0);
-  const jornadasTot = evento.jornadas.map((j) => ({ j, total: consumoJornada(j) }));
-  const maxJ = Math.max(1, ...jornadasTot.map((x) => x.total));
+      ini += c.inicial || 0; fin += c.final || 0; con += Math.max(0, (c.inicial || 0) - (c.final || 0));
+    }));
+    return { ini, fin, con };
+  };
 
   return (
     <div>
-      <div style={styles.summaryBar}>
-        <span style={{ color: COLORS.dim }}>Consumo total del evento</span>
-        <span style={styles.bigNum}>{totalEvento}</span>
-        <span style={{ color: COLORS.dim, fontSize: 13 }}>uds. · {evento.jornadas.length} jornadas</span>
-      </div>
-
-      <div style={styles.catTitle}>Consumo por jornada</div>
-      <div style={{ marginBottom: 28 }}>
-        {jornadasTot.map(({ j, total }) => (
-          <div key={j.id} style={{ marginBottom: 12 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
-              <span style={{ color: COLORS.cream, fontSize: 14 }}>{fechaLabel(j.fecha)}</span>
-              <span style={{ color: COLORS.gold, fontWeight: 600 }}>{total}</span>
-            </div>
-            <div style={styles.barTrack}><div style={{ ...styles.barFill, width: `${(total / maxJ) * 100}%` }} /></div>
-          </div>
-        ))}
-      </div>
-
-      <div style={styles.catTitle}>Total acumulado por producto</div>
+      <div style={styles.dimText}>Total por referencia, sumando todas las jornadas y ubicaciones del evento. Pulsa «Exportar Excel» (arriba) para descargar y tratar estos datos.</div>
       <div style={{ overflowX: "auto" }}>
         <table style={styles.matrix}>
           <thead><tr>
             <th style={{ ...styles.th, textAlign: "left" }}>Producto</th>
             <th style={styles.th}>Unidad</th>
-            <th style={{ ...styles.th, color: COLORS.gold }}>Consumo total</th>
+            <th style={styles.th}>Inicial</th>
+            <th style={styles.th}>Final</th>
+            <th style={{ ...styles.th, color: COLORS.gold }}>Consumo</th>
           </tr></thead>
           <tbody>
-            {evento.productos.map((p) => (
-              <tr key={p.id}>
-                <td style={{ ...styles.td, textAlign: "left", color: COLORS.cream }}>{p.nombre}</td>
-                <td style={{ ...styles.td, color: COLORS.dim }}>{p.unidad}</td>
-                <td style={{ ...styles.td, color: COLORS.gold, fontWeight: 600 }}>{consumoProd(p.id)}</td>
-              </tr>
-            ))}
+            {evento.productos.map((p) => {
+              const t = totalRef(p.id);
+              return (
+                <tr key={p.id}>
+                  <td style={{ ...styles.td, textAlign: "left", color: COLORS.cream }}>{p.nombre}</td>
+                  <td style={{ ...styles.td, color: COLORS.dim }}>{p.unidad}</td>
+                  <td style={{ ...styles.td, color: COLORS.cream }}>{t.ini}</td>
+                  <td style={{ ...styles.td, color: COLORS.cream }}>{t.fin}</td>
+                  <td style={{ ...styles.td, color: COLORS.gold, fontWeight: 600 }}>{t.con}</td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -882,12 +880,16 @@ function ExportButton({ evento }) {
 
     if (evento.productos.length) {
       const acc = evento.productos.map((p) => {
-        const total = evento.jornadas.reduce((a, j) => a + evento.ubicaciones.reduce((aa, u) => aa + cons(j, u, p.id), 0), 0);
-        return { Producto: p.nombre, "Categoría": p.categoria, Unidad: p.unidad, "Consumo total evento": total };
+        let ini = 0, fin = 0, con = 0;
+        evento.jornadas.forEach((j) => evento.ubicaciones.forEach((u) => {
+          const c = j.conteo?.[u]?.[p.id] || { inicial: 0, final: 0 };
+          ini += c.inicial || 0; fin += c.final || 0; con += Math.max(0, (c.inicial || 0) - (c.final || 0));
+        }));
+        return { Producto: p.nombre, "Categoría": p.categoria, Unidad: p.unidad, "Inicial total": ini, "Final total": fin, "Consumo total": con };
       });
       const ws = XLSX.utils.json_to_sheet(acc);
-      ws["!cols"] = [{ wch: 26 }, { wch: 14 }, { wch: 10 }, { wch: 20 }];
-      XLSX.utils.book_append_sheet(wb, ws, "Acumulado producto");
+      ws["!cols"] = [{ wch: 26 }, { wch: 14 }, { wch: 10 }, { wch: 12 }, { wch: 12 }, { wch: 14 }];
+      XLSX.utils.book_append_sheet(wb, ws, "Total por referencia");
     }
 
     if (wb.SheetNames.length === 0) { alert("No hay datos que exportar todavía."); return; }
