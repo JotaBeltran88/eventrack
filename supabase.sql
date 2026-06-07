@@ -30,3 +30,59 @@ create policy "eventrack actualizar publico"
 
 -- 4) Habilitar la sincronización en tiempo real para esta tabla.
 alter publication supabase_realtime add table public.eventrack_state;
+
+
+-- ─────────────────────────────────────────────────────────────
+--  ACCESO POR CÓDIGO (Admin / Contador)
+--  Los códigos se guardan aquí pero NO son legibles desde la app:
+--  la comprobación se hace con funciones del servidor (SECURITY DEFINER).
+-- ─────────────────────────────────────────────────────────────
+
+-- 5) Tabla de códigos (sin políticas de lectura => nadie puede leerla con la clave pública).
+create table if not exists public.eventrack_config (
+  id text primary key,
+  admin_code text not null,
+  contador_code text not null
+);
+alter table public.eventrack_config enable row level security;
+
+-- 6) Códigos iniciales (CÁMBIALOS luego desde la app, en ⚙ Acceso).
+insert into public.eventrack_config (id, admin_code, contador_code)
+values ('codes', 'admin1234', 'contar1234')
+on conflict (id) do nothing;
+
+-- 7) Función de login: devuelve 'admin', 'contador' o '' según el código.
+create or replace function public.eventrack_login(code text)
+returns text
+language sql
+security definer
+set search_path = public
+as $$
+  select case
+    when code = (select admin_code from public.eventrack_config where id = 'codes') then 'admin'
+    when code = (select contador_code from public.eventrack_config where id = 'codes') then 'contador'
+    else ''
+  end;
+$$;
+
+-- 8) Función para cambiar los códigos: exige el código de admin actual.
+create or replace function public.eventrack_set_codes(current_admin text, new_admin text, new_contador text)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare ok boolean;
+begin
+  select (current_admin = admin_code) into ok from public.eventrack_config where id = 'codes';
+  if not ok then return false; end if;
+  update public.eventrack_config
+    set admin_code = new_admin, contador_code = new_contador
+    where id = 'codes';
+  return true;
+end;
+$$;
+
+-- 9) Permitir que la app (clave pública) pueda EJECUTAR las funciones (no leer la tabla).
+grant execute on function public.eventrack_login(text) to anon, authenticated;
+grant execute on function public.eventrack_set_codes(text, text, text) to anon, authenticated;

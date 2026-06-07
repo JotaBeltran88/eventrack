@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import * as XLSX from "xlsx";
-import { loadState, saveState, subscribeState } from "./storage";
+import { loadState, saveState, subscribeState, login, setCodes } from "./storage";
 
 // ─────────────────────────────────────────────────────────────
 //  EVENTRACK · Jota Beltrán
@@ -102,6 +102,24 @@ export default function App() {
   const [saving, setSaving] = useState(false);
   const [eventos, setEventos] = useState([]);
   const [eventoActivoId, setEventoActivoId] = useState(null);
+  const [session, setSession] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("eventrack-session") || "null"); }
+    catch { return null; }
+  });
+  const [showAcceso, setShowAcceso] = useState(false);
+
+  const role = session?.role || null;
+  const handleLogin = (r) => {
+    const s = { role: r };
+    localStorage.setItem("eventrack-session", JSON.stringify(s));
+    setSession(s);
+  };
+  const cerrarSesion = () => {
+    localStorage.removeItem("eventrack-session");
+    setSession(null);
+    setEventoActivoId(null);
+    setShowAcceso(false);
+  };
 
   // Guarda la última versión sincronizada para no reescribir/recargar en bucle.
   const lastSynced = useRef("");
@@ -165,6 +183,10 @@ export default function App() {
     if (eventoActivoId === id) setEventoActivoId(null);
   };
 
+  if (!session) {
+    return <Login onLogin={handleLogin} />;
+  }
+
   if (!loaded) {
     return (
       <div style={{ ...styles.app, justifyContent: "center", alignItems: "center", minHeight: "60vh" }}>
@@ -189,19 +211,29 @@ export default function App() {
             <h1 style={styles.title}>Event<span style={{ color: COLORS.gold }}>rack</span></h1>
           </div>
         </div>
-        <div style={styles.saveTag}>{saving ? "Guardando…" : "Guardado ✓"}</div>
+        <div style={styles.headerRight}>
+          <span style={styles.saveTag}>{saving ? "Guardando…" : "Guardado ✓"}</span>
+          <span style={styles.roleTag}>{role === "admin" ? "Admin" : "Contador"}</span>
+          {role === "admin" && (
+            <button onClick={() => { setEventoActivoId(null); setShowAcceso(true); }} style={styles.linkBtn}>⚙ Acceso</button>
+          )}
+          <button onClick={cerrarSesion} style={styles.linkBtn}>Cerrar sesión</button>
+        </div>
       </header>
 
-      {!eventoActivo ? (
-        <EventosList eventos={eventos} onOpen={setEventoActivoId} onAdd={addEvento} onAddCompleto={addEventoCompleto} onRemove={removeEvento} />
+      {showAcceso ? (
+        <AccessView onClose={() => setShowAcceso(false)} />
+      ) : !eventoActivo ? (
+        <EventosList eventos={eventos} role={role} onOpen={setEventoActivoId} onAdd={addEvento} onAddCompleto={addEventoCompleto} onRemove={removeEvento} />
       ) : (
-        <EventoDetalle evento={eventoActivo} updateEvento={updateEvento} />
+        <EventoDetalle evento={eventoActivo} role={role} updateEvento={updateEvento} />
       )}
     </div>
   );
 }
 
-function EventosList({ eventos, onOpen, onAdd, onAddCompleto, onRemove }) {
+function EventosList({ eventos, role, onOpen, onAdd, onAddCompleto, onRemove }) {
+  const esAdmin = role === "admin";
   const [nombre, setNombre] = useState("");
   const [fecha, setFecha] = useState("");
   const [importMsg, setImportMsg] = useState(null);
@@ -252,7 +284,7 @@ function EventosList({ eventos, onOpen, onAdd, onAddCompleto, onRemove }) {
   return (
     <div>
       <div style={styles.sectionTitle}>Mis eventos</div>
-      {eventos.length === 0 && <div style={styles.empty}>Aún no hay eventos. Crea el primero abajo.</div>}
+      {eventos.length === 0 && <div style={styles.empty}>{esAdmin ? "Aún no hay eventos. Crea el primero abajo." : "Aún no hay eventos disponibles. Pide a un administrador que cree uno."}</div>}
 
       <div style={{ display: "grid", gap: 10, marginBottom: 28 }}>
         {eventos.map((ev) => (
@@ -264,12 +296,15 @@ function EventosList({ eventos, onOpen, onAdd, onAddCompleto, onRemove }) {
                 {ev.ubicaciones.length} ubic. · {ev.productos.length} referencias
               </div>
             </div>
-            <button onClick={(e) => { e.stopPropagation(); if (confirm(`¿Borrar "${ev.nombre}"?`)) onRemove(ev.id); }} style={styles.xBtn}>×</button>
+            {esAdmin && (
+              <button onClick={(e) => { e.stopPropagation(); if (confirm(`¿Borrar "${ev.nombre}"?`)) onRemove(ev.id); }} style={styles.xBtn}>×</button>
+            )}
             <span style={styles.chevron}>›</span>
           </div>
         ))}
       </div>
 
+      {esAdmin && (
       <div style={styles.formCard}>
         <div style={styles.formCardTitle}>Crear nuevo evento</div>
         <input value={nombre} onChange={(e) => setNombre(e.target.value)} placeholder="Nombre del evento (ej. Noches del Botánico)" style={styles.textInput} />
@@ -285,12 +320,14 @@ function EventosList({ eventos, onOpen, onAdd, onAddCompleto, onRemove }) {
         </div>
         {importMsg && <div style={{ color: COLORS.red, fontSize: 13 }}>{importMsg}</div>}
       </div>
+      )}
     </div>
   );
 }
 
-function EventoDetalle({ evento, updateEvento }) {
-  const [tab, setTab] = useState("jornadas");
+function EventoDetalle({ evento, role, updateEvento }) {
+  const esAdmin = role === "admin";
+  const [tab, setTab] = useState(role === "admin" ? "jornadas" : "conteo");
   const [jornadaActivaId, setJornadaActivaId] = useState(evento.jornadas[0]?.id || null);
   const [ubicActiva, setUbicActiva] = useState(evento.ubicaciones[0] || "");
 
@@ -315,16 +352,14 @@ function EventoDetalle({ evento, updateEvento }) {
           <div style={styles.eventTitle}>{evento.nombre}</div>
           <div style={styles.eventMeta}>{evento.jornadas.length} jornadas · {evento.ubicaciones.length} ubicaciones · {evento.productos.length} referencias</div>
         </div>
-        <ExportButton evento={evento} />
+        {esAdmin && <ExportButton evento={evento} />}
       </div>
 
       <nav style={styles.tabs}>
-        {[
-          ["jornadas", "Jornadas"],
-          ["config", "Configuración"],
-          ["conteo", "Conteo"],
-          ["resumen", "Resumen"],
-        ].map(([k, label]) => (
+        {(esAdmin
+          ? [["jornadas", "Jornadas"], ["config", "Configuración"], ["conteo", "Conteo"], ["resumen", "Resumen"]]
+          : [["conteo", "Conteo"], ["resumen", "Resumen"]]
+        ).map(([k, label]) => (
           <button key={k} onClick={() => setTab(k)} style={{ ...styles.tab, ...(tab === k ? styles.tabActive : {}) }}>{label}</button>
         ))}
       </nav>
@@ -749,6 +784,94 @@ function ExportButton({ evento }) {
   return <button onClick={exportar} style={styles.exportBtn}>↓ Exportar Excel</button>;
 }
 
+function Login({ onLogin }) {
+  const [code, setCode] = useState("");
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const entrar = async () => {
+    const c = code.trim();
+    if (!c) return;
+    setBusy(true); setErr("");
+    try {
+      const r = await login(c);
+      if (r === "admin" || r === "contador") { onLogin(r); return; }
+      setErr("Código incorrecto. Inténtalo de nuevo.");
+    } catch (e) {
+      setErr("No se pudo conectar. Revisa tu conexión.");
+    }
+    setBusy(false);
+  };
+
+  return (
+    <div style={{ ...styles.app, display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", minHeight: "100vh" }}>
+      <style>{globalCSS}</style>
+      <div style={styles.kicker}>JOTA BELTRÁN</div>
+      <h1 style={{ ...styles.title, fontSize: 40, marginBottom: 6 }}>Event<span style={{ color: COLORS.gold }}>rack</span></h1>
+      <p style={{ color: COLORS.dim, marginBottom: 22, fontSize: 14 }}>Introduce tu código de acceso</p>
+      <div style={{ ...styles.formCard, width: "100%", maxWidth: 320, marginTop: 0 }}>
+        <input
+          type="password"
+          value={code}
+          placeholder="Código de acceso"
+          onChange={(e) => setCode(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && entrar()}
+          style={styles.textInput}
+          autoFocus
+        />
+        <button onClick={entrar} disabled={busy} style={styles.addBtn}>{busy ? "Entrando…" : "Entrar"}</button>
+        {err && <div style={{ color: COLORS.red, fontSize: 13 }}>{err}</div>}
+      </div>
+    </div>
+  );
+}
+
+function AccessView({ onClose }) {
+  const [actual, setActual] = useState("");
+  const [nuevoAdmin, setNuevoAdmin] = useState("");
+  const [nuevoContador, setNuevoContador] = useState("");
+  const [msg, setMsg] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  const guardar = async () => {
+    if (!actual || !nuevoAdmin || !nuevoContador) {
+      setMsg({ ok: false, t: "Rellena los tres campos." });
+      return;
+    }
+    setBusy(true); setMsg(null);
+    try {
+      const ok = await setCodes(actual, nuevoAdmin.trim(), nuevoContador.trim());
+      if (ok) {
+        setMsg({ ok: true, t: "Códigos actualizados correctamente." });
+        setActual(""); setNuevoAdmin(""); setNuevoContador("");
+      } else {
+        setMsg({ ok: false, t: "El código de admin actual no es correcto." });
+      }
+    } catch (e) {
+      setMsg({ ok: false, t: "No se pudo guardar." });
+    }
+    setBusy(false);
+  };
+
+  return (
+    <div>
+      <button onClick={onClose} style={styles.volverBtn}>‹ Volver</button>
+      <div style={{ ...styles.sectionTitle, marginTop: 14 }}>Gestión de acceso</div>
+      <div style={styles.dimText}>Cambia los códigos de Admin y Contador. Necesitas el código de admin actual para confirmar el cambio.</div>
+      <div style={styles.formCard}>
+        <label style={styles.fieldLabel}>Código de admin actual</label>
+        <input type="password" value={actual} onChange={(e) => setActual(e.target.value)} placeholder="Código actual" style={styles.textInput} />
+        <label style={styles.fieldLabel}>Nuevo código de Admin</label>
+        <input type="text" value={nuevoAdmin} onChange={(e) => setNuevoAdmin(e.target.value)} placeholder="Nuevo código de admin" style={styles.textInput} />
+        <label style={styles.fieldLabel}>Nuevo código de Contador</label>
+        <input type="text" value={nuevoContador} onChange={(e) => setNuevoContador(e.target.value)} placeholder="Nuevo código de contador" style={styles.textInput} />
+        <button onClick={guardar} disabled={busy} style={styles.addBtn}>{busy ? "Guardando…" : "Guardar códigos"}</button>
+        {msg && <div style={{ color: msg.ok ? COLORS.green : COLORS.red, fontSize: 13 }}>{msg.t}</div>}
+      </div>
+    </div>
+  );
+}
+
 const globalCSS = `
   @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,900&family=Outfit:wght@300;400;500;600&display=swap');
   * { box-sizing: border-box; }
@@ -764,6 +887,10 @@ const styles = {
   kicker: { fontSize: 11, letterSpacing: "0.22em", color: COLORS.goldDim, fontWeight: 500, marginBottom: 6 },
   title: { fontFamily: "'Fraunces', serif", fontSize: 34, fontWeight: 900, margin: 0, color: COLORS.cream, letterSpacing: "-0.01em" },
   saveTag: { fontSize: 12, color: COLORS.goldDim, fontWeight: 500, whiteSpace: "nowrap" },
+  headerRight: { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" },
+  roleTag: { fontSize: 11, fontWeight: 600, color: COLORS.bg, background: COLORS.gold, padding: "3px 10px", borderRadius: 12, letterSpacing: "0.04em", whiteSpace: "nowrap" },
+  linkBtn: { background: "transparent", border: `1px solid ${COLORS.line}`, color: COLORS.dim, fontSize: 12, fontWeight: 500, padding: "5px 10px", borderRadius: 14, whiteSpace: "nowrap" },
+  fieldLabel: { fontSize: 12, color: COLORS.dim, fontWeight: 500, marginTop: 4 },
   volverBtn: { background: "transparent", border: `1px solid ${COLORS.line}`, color: COLORS.gold, fontSize: 13, fontWeight: 500, padding: "5px 12px", borderRadius: 18, marginBottom: 8 },
   sectionTitle: { fontFamily: "'Fraunces', serif", fontSize: 22, fontWeight: 600, color: COLORS.cream, marginBottom: 16 },
   empty: { background: COLORS.panel, border: `1px solid ${COLORS.line}`, borderRadius: 12, padding: 24, color: COLORS.dim, textAlign: "center", fontSize: 14 },

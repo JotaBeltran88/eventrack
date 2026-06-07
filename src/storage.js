@@ -57,3 +57,29 @@ export function subscribeState(cb) {
     .subscribe();
   return () => supabase.removeChannel(channel);
 }
+
+// ── Acceso por código (verificación en el servidor) ──
+
+// Comprueba un código. Devuelve "admin", "contador" o "" si no coincide.
+export async function login(code) {
+  const { data, error } = await supabase.rpc("eventrack_login", { code });
+  if (error) {
+    console.error("Error de login:", error.message);
+    return "";
+  }
+  return data || "";
+}
+
+// Cambia ambos códigos. Requiere el código de admin actual. Devuelve true si funcionó.
+export async function setCodes(currentAdmin, newAdmin, newContador) {
+  const { data, error } = await supabase.rpc("eventrack_set_codes", {
+    current_admin: currentAdmin,
+    new_admin: newAdmin,
+    new_contador: newContador,
+  });
+  if (error) {
+    console.error("Error cambiando códigos:", error.message);
+    return false;
+  }
+  return data === true;
+}
