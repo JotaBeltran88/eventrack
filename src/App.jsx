@@ -467,7 +467,7 @@ function EventoDetalle({ evento, role, updateEvento, onGuardar }) {
       </nav>
 
       {tab === "conteo" && (
-        <ConteoView evento={evento} upd={upd} jornada={jornadaActiva} jornadaActivaId={jornadaActivaId} setJornadaActivaId={setJornadaActivaId} ubicActiva={ubicActiva} setUbicActiva={setUbicActiva} onGuardar={onGuardar} />
+        <ConteoView evento={evento} role={role} upd={upd} jornada={jornadaActiva} jornadaActivaId={jornadaActivaId} setJornadaActivaId={setJornadaActivaId} ubicActiva={ubicActiva} setUbicActiva={setUbicActiva} onGuardar={onGuardar} />
       )}
       {tab === "resumen" && <ResumenView evento={evento} />}
     </div>
@@ -514,16 +514,29 @@ function JornadasView({ evento, upd, jornadaActivaId, setJornadaActivaId }) {
   };
 
   const removeJornada = (id) => upd((ev) => ({ ...ev, jornadas: ev.jornadas.filter((j) => j.id !== id) }));
+  const toggleEditable = (id) => upd((ev) => ({
+    ...ev,
+    jornadas: ev.jornadas.map((j) => (j.id === id ? { ...j, editable: j.editable === false ? true : false } : j)),
+  }));
 
   return (
     <div>
       <div style={{ ...styles.sectionTitle, marginTop: 34 }}>Jornadas {esSingle ? "(día único)" : "del evento"}</div>
+      {!esSingle && <div style={styles.dimText}>Marca qué jornadas puede editar el Contador. Las de «Solo lectura» solo podrá verlas.</div>}
       {evento.jornadas.length === 0 && <div style={styles.empty}>{esSingle ? "Añade la fecha del día abajo." : "Sin jornadas. Añade noches sueltas o genera un rango de fechas abajo."}</div>}
 
       <div style={{ display: "grid", gap: 8, marginBottom: 24 }}>
         {evento.jornadas.map((j) => (
           <div key={j.id} style={{ ...styles.jornadaRow, ...(j.id === jornadaActivaId ? styles.jornadaRowActive : {}) }} onClick={() => setJornadaActivaId(j.id)}>
             <span style={{ flex: 1, color: COLORS.cream, fontWeight: 500 }}>{fechaLabel(j.fecha)}</span>
+            {!esSingle && (
+              <button
+                onClick={(e) => { e.stopPropagation(); toggleEditable(j.id); }}
+                style={{ ...styles.toggleBtn, ...(j.editable === false ? styles.toggleLocked : styles.toggleOpen) }}
+              >
+                {j.editable === false ? "🔒 Solo lectura" : "🔓 Editable"}
+              </button>
+            )}
             <button onClick={(e) => { e.stopPropagation(); removeJornada(j.id); }} style={styles.xBtnSm}>×</button>
           </div>
         ))}
@@ -707,7 +720,7 @@ function JornadaSelector({ evento, jornadaActivaId, setJornadaActivaId }) {
         <label style={{ ...styles.fieldLabel, display: "block", marginBottom: 6 }}>Jornada</label>
         <select value={jornadaActivaId || ""} onChange={(e) => setJornadaActivaId(e.target.value)} style={styles.select}>
           {evento.jornadas.map((j) => (
-            <option key={j.id} value={j.id}>{fechaLabel(j.fecha)}</option>
+            <option key={j.id} value={j.id}>{fechaLabel(j.fecha)}{j.editable === false ? " · 🔒 solo lectura" : ""}</option>
           ))}
         </select>
       </div>
@@ -724,7 +737,7 @@ function JornadaSelector({ evento, jornadaActivaId, setJornadaActivaId }) {
   );
 }
 
-function ConteoView({ evento, upd, jornada, jornadaActivaId, setJornadaActivaId, ubicActiva, setUbicActiva, onGuardar }) {
+function ConteoView({ evento, role, upd, jornada, jornadaActivaId, setJornadaActivaId, ubicActiva, setUbicActiva, onGuardar }) {
   const [catActiva, setCatActiva] = useState("");
   const [guardado, setGuardado] = useState(false);
   if (evento.ubicaciones.length === 0 || evento.productos.length === 0)
@@ -734,7 +747,10 @@ function ConteoView({ evento, upd, jornada, jornadaActivaId, setJornadaActivaId,
   if (!jornada) return (<div><JornadaSelector evento={evento} jornadaActivaId={jornadaActivaId} setJornadaActivaId={setJornadaActivaId} /><div style={styles.empty}>Selecciona una jornada.</div></div>);
 
   const getCell = (ubic, pid) => jornada.conteo?.[ubic]?.[pid] || { inicial: 0, final: 0 };
+  const puedeEditar = role === "admin" || jornada.editable !== false;
+
   const setValor = (pid, campo, valor) => {
+    if (!puedeEditar) return;
     const v = valor === "" ? 0 : Math.max(0, Number(valor));
     upd((ev) => {
       // Localiza la jornada siguiente por fecha: su Inicial heredará este Final.
@@ -779,6 +795,10 @@ function ConteoView({ evento, upd, jornada, jornadaActivaId, setJornadaActivaId,
         ))}
       </div>
 
+      {!puedeEditar && (
+        <div style={{ ...styles.empty, color: COLORS.gold, marginBottom: 16 }}>🔒 Esta jornada está en solo lectura. Un administrador debe habilitarla para poder modificarla.</div>
+      )}
+
       <div style={{ marginBottom: 18 }}>
         <label style={{ ...styles.fieldLabel, display: "block", marginBottom: 6 }}>Familia de productos</label>
         <select value={catSel} onChange={(e) => setCatActiva(e.target.value)} style={styles.select}>
@@ -804,8 +824,8 @@ function ConteoView({ evento, upd, jornada, jornadaActivaId, setJornadaActivaId,
             return (
               <div key={p.id} style={styles.row}>
                 <span style={{ flex: 2 }}><span style={{ color: COLORS.cream }}>{p.nombre}</span><span style={styles.unidad}> · {p.unidad}</span></span>
-                <input type="number" min="0" value={c.inicial || ""} placeholder="0" onChange={(e) => setValor(p.id, "inicial", e.target.value)} style={styles.input} />
-                <input type="number" min="0" value={c.final || ""} placeholder="0" onChange={(e) => setValor(p.id, "final", e.target.value)} style={styles.input} />
+                <input type="number" min="0" value={c.inicial || ""} placeholder="0" disabled={!puedeEditar} onChange={(e) => setValor(p.id, "inicial", e.target.value)} style={{ ...styles.input, ...(puedeEditar ? {} : styles.inputDisabled) }} />
+                <input type="number" min="0" value={c.final || ""} placeholder="0" disabled={!puedeEditar} onChange={(e) => setValor(p.id, "final", e.target.value)} style={{ ...styles.input, ...(puedeEditar ? {} : styles.inputDisabled) }} />
                 <span style={{ ...styles.colNum, color: consumo > 0 ? COLORS.gold : COLORS.dim, fontWeight: 600 }}>{consumo}</span>
               </div>
             );
@@ -813,7 +833,7 @@ function ConteoView({ evento, upd, jornada, jornadaActivaId, setJornadaActivaId,
         </div>
       )}
 
-      <button onClick={guardar} style={styles.continueBtn}>Guardar</button>
+      {puedeEditar && <button onClick={guardar} style={styles.continueBtn}>Guardar</button>}
       {guardado && <div style={{ color: COLORS.green, fontSize: 13, textAlign: "center", marginTop: 8 }}>Guardado ✓</div>}
       <button onClick={() => descargarJornadaExcel(evento, jornada)} style={{ ...styles.smallBtn, width: "100%", marginTop: 10 }}>↓ Descargar inventario del día (Excel)</button>
     </div>
@@ -1135,6 +1155,10 @@ const styles = {
   row: { display: "flex", alignItems: "center", padding: "8px 4px", borderBottom: `1px solid ${COLORS.panel2}` },
   unidad: { color: COLORS.dim, fontSize: 12 },
   input: { width: 78, textAlign: "center", background: COLORS.panel2, border: `1px solid ${COLORS.line}`, borderRadius: 7, color: COLORS.cream, fontSize: 14, padding: "7px 4px", fontFamily: "'Outfit', sans-serif" },
+  inputDisabled: { opacity: 0.5, cursor: "not-allowed" },
+  toggleBtn: { border: "1px solid", fontSize: 11, fontWeight: 600, padding: "4px 9px", borderRadius: 14, whiteSpace: "nowrap", background: "transparent" },
+  toggleOpen: { borderColor: COLORS.green, color: COLORS.green },
+  toggleLocked: { borderColor: COLORS.goldDim, color: COLORS.dim },
   barTrack: { height: 10, background: COLORS.panel2, borderRadius: 6, overflow: "hidden" },
   barFill: { height: "100%", background: `linear-gradient(90deg, ${COLORS.goldDim}, ${COLORS.gold})`, borderRadius: 6, transition: "width .4s" },
   matrix: { width: "100%", borderCollapse: "collapse", fontSize: 13 },
