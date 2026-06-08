@@ -746,6 +746,11 @@ function JornadaSelector({ evento, jornadaActivaId, setJornadaActivaId }) {
 
 function ConteoView({ evento, role, upd, jornada, jornadaActivaId, setJornadaActivaId, ubicActiva, setUbicActiva, onGuardar }) {
   const [catActiva, setCatActiva] = useState("");
+  const [movTipo, setMovTipo] = useState("entrada");
+  const [movProd, setMovProd] = useState("");
+  const [movCant, setMovCant] = useState("");
+  const [movDest, setMovDest] = useState("");
+  const [movCom, setMovCom] = useState("");
   if (evento.ubicaciones.length === 0 || evento.productos.length === 0)
     return <div style={styles.empty}>Necesitas ubicaciones y referencias (Configuración) para el conteo.</div>;
   if (evento.jornadas.length === 0)
@@ -801,6 +806,23 @@ function ConteoView({ evento, role, upd, jornada, jornadaActivaId, setJornadaAct
     }));
   };
   const puedeAvanzar = !puedeEditar || !!realizadoPor.trim();
+
+  const prodNombre = (pid) => { const p = evento.productos.find((x) => x.id === pid); return p ? p.nombre : pid; };
+  const movimientosUbic = (jornada.movimientos || []).filter((m) => m.ubic === ubicActiva || (m.tipo === "traspaso" && m.destino === ubicActiva));
+  const addMovimiento = () => {
+    const cant = Number(movCant);
+    if (!movProd || !cant || cant <= 0) return;
+    if (movTipo === "traspaso" && (!movDest || movDest === ubicActiva)) return;
+    const mov = {
+      id: "m" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
+      tipo: movTipo, productoId: movProd, ubic: ubicActiva,
+      destino: movTipo === "traspaso" ? movDest : "",
+      cantidad: cant, comentario: movCom.trim(), hora: horaActual(),
+    };
+    upd((ev) => ({ ...ev, jornadas: ev.jornadas.map((j) => (j.id === jornada.id ? { ...j, movimientos: [...(j.movimientos || []), mov] } : j)) }));
+    setMovCant(""); setMovCom(""); setMovDest("");
+  };
+  const removeMovimiento = (id) => upd((ev) => ({ ...ev, jornadas: ev.jornadas.map((j) => (j.id === jornada.id ? { ...j, movimientos: (j.movimientos || []).filter((m) => m.id !== id) } : j)) }));
 
   const setValor = (pid, campo, valor) => {
     if (!puedeEditar) return;
@@ -884,25 +906,74 @@ function ConteoView({ evento, role, upd, jornada, jornadaActivaId, setJornadaAct
         <div style={styles.empty}>Elige una familia de productos para ver sus referencias.</div>
       ) : (
         <div style={{ marginBottom: 26 }}>
-          <div style={styles.dimText}>El Inicial de cada jornada se hereda del Final de la anterior. Puedes sobrescribirlo si hubo reposición.</div>
+          <div style={styles.dimText}>Consumo = Inicial + Entradas − Salidas − Final. El Inicial se hereda del Final de la jornada anterior; las entradas, salidas y traspasos se registran abajo en «Movimientos».</div>
           <div style={styles.tableHead}>
             <span style={{ flex: 2 }}>Producto</span>
             <span style={styles.colNum}>Inicial</span><span style={styles.colNum}>Final</span><span style={styles.colNum}>Consumo</span>
           </div>
           {evento.productos.filter((p) => p.categoria === catSel).map((p) => {
             const c = getCell(ubicActiva, p.id);
-            const consumo = Math.max(0, c.inicial - c.final);
+            const t = celdaTotales(jornada, ubicActiva, p.id);
             return (
               <div key={p.id} style={styles.row}>
-                <span style={{ flex: 2 }}><span style={{ color: COLORS.cream }}>{p.nombre}</span><span style={styles.unidad}> · {p.unidad}</span></span>
+                <span style={{ flex: 2 }}>
+                  <span style={{ color: COLORS.cream }}>{p.nombre}</span><span style={styles.unidad}> · {p.unidad}</span>
+                  {(t.ent > 0 || t.sal > 0) && <span style={styles.movHint}>{t.ent > 0 ? ` ▲ +${t.ent}` : ""}{t.sal > 0 ? ` ▼ −${t.sal}` : ""}</span>}
+                </span>
                 <input type="number" min="0" value={c.inicial || ""} placeholder="0" disabled={!puedeEditar} onChange={(e) => setValor(p.id, "inicial", e.target.value)} style={{ ...styles.input, ...(puedeEditar ? {} : styles.inputDisabled) }} />
                 <input type="number" min="0" value={c.final || ""} placeholder="0" disabled={!puedeEditar} onChange={(e) => setValor(p.id, "final", e.target.value)} style={{ ...styles.input, ...(puedeEditar ? {} : styles.inputDisabled) }} />
-                <span style={{ ...styles.colNum, color: consumo > 0 ? COLORS.gold : COLORS.dim, fontWeight: 600 }}>{consumo}</span>
+                <span style={{ ...styles.colNum, color: t.con > 0 ? COLORS.gold : COLORS.dim, fontWeight: 600 }}>{t.con}</span>
               </div>
             );
           })}
         </div>
       )}
+
+      <div style={styles.formCard}>
+        <div style={styles.formCardTitle}>Movimientos · {ubicActiva}</div>
+        <div style={styles.dimText}>Entradas (reposición), salidas (mermas o cesiones) y traspasos a otra ubicación. Cada uno con su comentario.</div>
+        {movimientosUbic.length === 0 && <div style={{ color: COLORS.dim, fontSize: 13 }}>Sin movimientos en esta ubicación.</div>}
+        {movimientosUbic.map((m) => {
+          const recibido = m.tipo === "traspaso" && m.destino === ubicActiva;
+          const etiqueta = m.tipo === "entrada" ? "🔵 Entrada"
+            : m.tipo === "salida" ? "🔴 Salida"
+            : recibido ? `🔁 Recibido de ${m.ubic}` : `🔁 Traspaso → ${m.destino}`;
+          const signo = (m.tipo === "entrada" || recibido) ? "+" : "−";
+          return (
+            <div key={m.id} style={styles.movRow}>
+              <div style={{ flex: 1 }}>
+                <div style={{ color: COLORS.cream, fontSize: 13 }}>{etiqueta} · {prodNombre(m.productoId)} · {signo}{m.cantidad}</div>
+                {(m.comentario || m.hora) && <div style={{ color: COLORS.dim, fontSize: 12 }}>{m.hora ? m.hora + " · " : ""}{m.comentario}</div>}
+              </div>
+              {puedeEditar && !recibido && <button onClick={() => removeMovimiento(m.id)} style={styles.xBtnSm}>×</button>}
+            </div>
+          );
+        })}
+        {puedeEditar && (
+          <div style={{ borderTop: `1px solid ${COLORS.line}`, marginTop: 10, paddingTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
+            <select value={movTipo} onChange={(e) => setMovTipo(e.target.value)} style={styles.select}>
+              <option value="entrada">Entrada (reposición)</option>
+              <option value="salida">Salida (merma / cesión)</option>
+              <option value="traspaso">Traspaso a otra ubicación</option>
+            </select>
+            <select value={movProd} onChange={(e) => setMovProd(e.target.value)} style={styles.select}>
+              <option value="">— Producto —</option>
+              {evento.productos.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+            </select>
+            <div style={styles.formRow}>
+              <input type="number" min="0" value={movCant} placeholder="Cantidad" onChange={(e) => setMovCant(e.target.value)} style={styles.textInput} />
+              {movTipo === "traspaso" && (
+                <select value={movDest} onChange={(e) => setMovDest(e.target.value)} style={styles.textInput}>
+                  <option value="">— Destino —</option>
+                  {evento.ubicaciones.filter((u) => u !== ubicActiva).map((u) => <option key={u} value={u}>{u}</option>)}
+                </select>
+              )}
+            </div>
+            <input type="text" value={movCom} placeholder="Comentario (ej. pedido de camerinos)" onChange={(e) => setMovCom(e.target.value)} style={styles.textInput} />
+            <button onClick={addMovimiento} style={styles.addBtn}>+ Añadir movimiento</button>
+          </div>
+        )}
+      </div>
       </>
       )}
 
@@ -917,12 +988,12 @@ function ResumenView({ evento }) {
 
   // Totales por referencia, sumando todas las jornadas y ubicaciones.
   const totalRef = (pid) => {
-    let ini = 0, fin = 0, con = 0;
+    let ini = 0, fin = 0, ent = 0, sal = 0, con = 0;
     evento.jornadas.forEach((j) => evento.ubicaciones.forEach((u) => {
-      const c = j.conteo?.[u]?.[pid] || { inicial: 0, final: 0 };
-      ini += c.inicial || 0; fin += c.final || 0; con += Math.max(0, (c.inicial || 0) - (c.final || 0));
+      const t = celdaTotales(j, u, pid);
+      ini += t.ini; fin += t.fin; ent += t.ent; sal += t.sal; con += t.con;
     }));
-    return { ini, fin, con };
+    return { ini, fin, ent, sal, con };
   };
 
   return (
@@ -935,6 +1006,8 @@ function ResumenView({ evento }) {
             <th style={{ ...styles.th, textAlign: "left" }}>Producto</th>
             <th style={styles.th}>Unidad</th>
             <th style={styles.th}>Inicial</th>
+            <th style={styles.th}>Entradas</th>
+            <th style={styles.th}>Salidas</th>
             <th style={styles.th}>Final</th>
             <th style={{ ...styles.th, color: COLORS.gold }}>Consumo</th>
           </tr></thead>
@@ -946,6 +1019,8 @@ function ResumenView({ evento }) {
                   <td style={{ ...styles.td, textAlign: "left", color: COLORS.cream }}>{p.nombre}</td>
                   <td style={{ ...styles.td, color: COLORS.dim }}>{p.unidad}</td>
                   <td style={{ ...styles.td, color: COLORS.cream }}>{t.ini}</td>
+                  <td style={{ ...styles.td, color: COLORS.cream }}>{t.ent}</td>
+                  <td style={{ ...styles.td, color: COLORS.cream }}>{t.sal}</td>
                   <td style={{ ...styles.td, color: COLORS.cream }}>{t.fin}</td>
                   <td style={{ ...styles.td, color: COLORS.gold, fontWeight: 600 }}>{t.con}</td>
                 </tr>
@@ -962,14 +1037,29 @@ function nombreSeguro(nombre) {
   return (nombre || "evento").replace(/[^\w\sáéíóúñ-]/gi, "").replace(/\s+/g, "_").slice(0, 40) || "evento";
 }
 
+// Totales de una celda (ubicación + producto) en una jornada, con movimientos.
+// Consumo = Inicial + Entradas − Salidas − Final.
+function celdaTotales(jornada, ubic, pid) {
+  const c = (jornada.conteo && jornada.conteo[ubic] && jornada.conteo[ubic][pid]) || { inicial: 0, final: 0 };
+  const ini = c.inicial || 0, fin = c.final || 0;
+  let ent = 0, sal = 0;
+  for (const m of (jornada.movimientos || [])) {
+    if (m.productoId !== pid) continue;
+    const cant = Number(m.cantidad) || 0;
+    if (m.tipo === "entrada" && m.ubic === ubic) ent += cant;
+    else if (m.tipo === "traspaso" && m.destino === ubic) ent += cant;
+    else if (m.tipo === "salida" && m.ubic === ubic) sal += cant;
+    else if (m.tipo === "traspaso" && m.ubic === ubic) sal += cant;
+  }
+  return { ini, fin, ent, sal, con: Math.max(0, ini + ent - sal - fin) };
+}
+
 // Construye la hoja de inventario de UNA jornada en formato cruzado:
 // una fila por producto, y por cada ubicación (más un grupo Total) las
 // columnas Inicial / Final / Consumo, con cabecera de dos niveles.
 function hojaInventarioJornada(evento, jornada) {
   const ubic = evento.ubicaciones;
   const grupos = ["Total", ...ubic];
-  const cons = (c) => Math.max(0, (c.inicial || 0) - (c.final || 0));
-  const cel = (u, pid) => jornada.conteo?.[u]?.[pid] || { inicial: 0, final: 0 };
 
   const fila1 = ["", "", ""];
   grupos.forEach((g) => fila1.push(g, "", ""));
@@ -980,9 +1070,9 @@ function hojaInventarioJornada(evento, jornada) {
   evento.productos.forEach((p) => {
     const row = [p.categoria, p.nombre, p.unidad];
     let tIni = 0, tFin = 0, tCon = 0;
-    ubic.forEach((u) => { const c = cel(u, p.id); tIni += c.inicial || 0; tFin += c.final || 0; tCon += cons(c); });
+    ubic.forEach((u) => { const t = celdaTotales(jornada, u, p.id); tIni += t.ini; tFin += t.fin; tCon += t.con; });
     row.push(tIni, tFin, tCon);
-    ubic.forEach((u) => { const c = cel(u, p.id); row.push(c.inicial || 0, c.final || 0, cons(c)); });
+    ubic.forEach((u) => { const t = celdaTotales(jornada, u, p.id); row.push(t.ini, t.fin, t.con); });
     filas.push(row);
   });
 
@@ -1007,6 +1097,18 @@ function descargarJornadaExcel(evento, jornada) {
   const wsR = XLSX.utils.json_to_sheet(resp);
   wsR["!cols"] = [{ wch: 20 }, { wch: 28 }, { wch: 10 }, { wch: 12 }];
   XLSX.utils.book_append_sheet(wb, wsR, "Responsables");
+
+  const movs = (jornada.movimientos || []).map((m) => ({
+    Tipo: m.tipo === "entrada" ? "Entrada" : m.tipo === "salida" ? "Salida" : "Traspaso",
+    Producto: (evento.productos.find((p) => p.id === m.productoId) || {}).nombre || m.productoId,
+    Cantidad: m.cantidad, Origen: m.ubic, Destino: m.destino || "",
+    Comentario: m.comentario || "", Hora: m.hora || "",
+  }));
+  if (movs.length) {
+    const wsM = XLSX.utils.json_to_sheet(movs);
+    wsM["!cols"] = [{ wch: 10 }, { wch: 26 }, { wch: 10 }, { wch: 16 }, { wch: 16 }, { wch: 34 }, { wch: 8 }];
+    XLSX.utils.book_append_sheet(wb, wsM, "Movimientos");
+  }
   XLSX.writeFile(wb, `Eventrack_${nombreSeguro(evento.nombre)}_${jornada.fecha || "sinfecha"}.xlsx`);
 }
 
@@ -1014,15 +1116,15 @@ function descargarJornadaExcel(evento, jornada) {
 function descargarResumenExcel(evento) {
   const wb = XLSX.utils.book_new();
   const filas = evento.productos.map((p) => {
-    let ini = 0, fin = 0, con = 0;
+    let ini = 0, fin = 0, ent = 0, sal = 0, con = 0;
     evento.jornadas.forEach((j) => evento.ubicaciones.forEach((u) => {
-      const c = j.conteo?.[u]?.[p.id] || { inicial: 0, final: 0 };
-      ini += c.inicial || 0; fin += c.final || 0; con += Math.max(0, (c.inicial || 0) - (c.final || 0));
+      const t = celdaTotales(j, u, p.id);
+      ini += t.ini; fin += t.fin; ent += t.ent; sal += t.sal; con += t.con;
     }));
-    return { Producto: p.nombre, "Categoría": p.categoria, Unidad: p.unidad, "Inicial total": ini, "Final total": fin, "Consumo total": con };
+    return { Producto: p.nombre, "Categoría": p.categoria, Unidad: p.unidad, "Inicial total": ini, "Entradas": ent, "Salidas": sal, "Final total": fin, "Consumo total": con };
   });
   const ws = XLSX.utils.json_to_sheet(filas);
-  ws["!cols"] = [{ wch: 26 }, { wch: 14 }, { wch: 10 }, { wch: 12 }, { wch: 12 }, { wch: 14 }];
+  ws["!cols"] = [{ wch: 26 }, { wch: 14 }, { wch: 10 }, { wch: 12 }, { wch: 10 }, { wch: 10 }, { wch: 12 }, { wch: 14 }];
   XLSX.utils.book_append_sheet(wb, ws, "Total por referencia");
   XLSX.writeFile(wb, `Eventrack_${nombreSeguro(evento.nombre)}_resumen.xlsx`);
 }
@@ -1030,7 +1132,7 @@ function descargarResumenExcel(evento) {
 function ExportButton({ evento }) {
   const exportar = () => {
     const wb = XLSX.utils.book_new();
-    const cons = (j, u, pid) => { const c = j.conteo?.[u]?.[pid] || { inicial: 0, final: 0 }; return Math.max(0, c.inicial - c.final); };
+    const cons = (j, u, pid) => celdaTotales(j, u, pid).con;
 
     if (evento.jornadas.length) {
       const filas = evento.jornadas.map((j) => {
@@ -1044,27 +1146,41 @@ function ExportButton({ evento }) {
 
     const detalle = [];
     evento.jornadas.forEach((j) => evento.ubicaciones.forEach((u) => evento.productos.forEach((p) => {
-      const c = j.conteo?.[u]?.[p.id] || { inicial: 0, final: 0 };
-      detalle.push({ Jornada: j.fecha, "Ubicación": u, "Categoría": p.categoria, Producto: p.nombre, Unidad: p.unidad, Inicial: c.inicial, Final: c.final, Consumo: Math.max(0, c.inicial - c.final) });
+      const t = celdaTotales(j, u, p.id);
+      detalle.push({ Jornada: j.fecha, "Ubicación": u, "Categoría": p.categoria, Producto: p.nombre, Unidad: p.unidad, Inicial: t.ini, Entradas: t.ent, Salidas: t.sal, Final: t.fin, Consumo: t.con });
     })));
     if (detalle.length) {
       const ws = XLSX.utils.json_to_sheet(detalle);
-      ws["!cols"] = [{ wch: 12 }, { wch: 18 }, { wch: 14 }, { wch: 26 }, { wch: 10 }, { wch: 9 }, { wch: 9 }, { wch: 10 }];
+      ws["!cols"] = [{ wch: 12 }, { wch: 18 }, { wch: 14 }, { wch: 26 }, { wch: 10 }, { wch: 9 }, { wch: 9 }, { wch: 9 }, { wch: 9 }, { wch: 10 }];
       XLSX.utils.book_append_sheet(wb, ws, "Detalle inventario");
     }
 
     if (evento.productos.length) {
       const acc = evento.productos.map((p) => {
-        let ini = 0, fin = 0, con = 0;
+        let ini = 0, fin = 0, ent = 0, sal = 0, con = 0;
         evento.jornadas.forEach((j) => evento.ubicaciones.forEach((u) => {
-          const c = j.conteo?.[u]?.[p.id] || { inicial: 0, final: 0 };
-          ini += c.inicial || 0; fin += c.final || 0; con += Math.max(0, (c.inicial || 0) - (c.final || 0));
+          const t = celdaTotales(j, u, p.id);
+          ini += t.ini; fin += t.fin; ent += t.ent; sal += t.sal; con += t.con;
         }));
-        return { Producto: p.nombre, "Categoría": p.categoria, Unidad: p.unidad, "Inicial total": ini, "Final total": fin, "Consumo total": con };
+        return { Producto: p.nombre, "Categoría": p.categoria, Unidad: p.unidad, "Inicial total": ini, "Entradas": ent, "Salidas": sal, "Final total": fin, "Consumo total": con };
       });
       const ws = XLSX.utils.json_to_sheet(acc);
-      ws["!cols"] = [{ wch: 26 }, { wch: 14 }, { wch: 10 }, { wch: 12 }, { wch: 12 }, { wch: 14 }];
+      ws["!cols"] = [{ wch: 26 }, { wch: 14 }, { wch: 10 }, { wch: 12 }, { wch: 10 }, { wch: 10 }, { wch: 12 }, { wch: 14 }];
       XLSX.utils.book_append_sheet(wb, ws, "Total por referencia");
+    }
+
+    const movsAll = [];
+    evento.jornadas.forEach((j) => (j.movimientos || []).forEach((m) => {
+      movsAll.push({
+        Jornada: j.fecha, Tipo: m.tipo === "entrada" ? "Entrada" : m.tipo === "salida" ? "Salida" : "Traspaso",
+        Producto: (evento.productos.find((p) => p.id === m.productoId) || {}).nombre || m.productoId,
+        Cantidad: m.cantidad, Origen: m.ubic, Destino: m.destino || "", Comentario: m.comentario || "", Hora: m.hora || "",
+      });
+    }));
+    if (movsAll.length) {
+      const ws = XLSX.utils.json_to_sheet(movsAll);
+      ws["!cols"] = [{ wch: 12 }, { wch: 10 }, { wch: 26 }, { wch: 10 }, { wch: 16 }, { wch: 16 }, { wch: 34 }, { wch: 8 }];
+      XLSX.utils.book_append_sheet(wb, ws, "Movimientos");
     }
 
     if (wb.SheetNames.length === 0) { alert("No hay datos que exportar todavía."); return; }
@@ -1238,6 +1354,8 @@ const styles = {
   unidad: { color: COLORS.dim, fontSize: 12 },
   input: { width: 78, textAlign: "center", background: COLORS.panel2, border: `1px solid ${COLORS.line}`, borderRadius: 7, color: COLORS.cream, fontSize: 14, padding: "7px 4px", fontFamily: "'Outfit', sans-serif" },
   inputDisabled: { opacity: 0.5, cursor: "not-allowed" },
+  movRow: { display: "flex", alignItems: "center", gap: 8, padding: "8px 0", borderBottom: `1px solid ${COLORS.panel2}` },
+  movHint: { fontSize: 11, color: COLORS.dim, marginLeft: 6, whiteSpace: "nowrap" },
   toggleBtn: { border: "1px solid", fontSize: 11, fontWeight: 600, padding: "4px 9px", borderRadius: 14, whiteSpace: "nowrap", background: "transparent" },
   toggleOpen: { borderColor: COLORS.green, color: COLORS.green },
   toggleLocked: { borderColor: COLORS.goldDim, color: COLORS.dim },
