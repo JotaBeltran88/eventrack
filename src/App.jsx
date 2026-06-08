@@ -44,6 +44,31 @@ function mergeEstado(base, mine, theirs) {
   return r && Array.isArray(r.eventos) ? r : { eventos: (mine && mine.eventos) || [] };
 }
 
+// Compacta: elimina las celdas de conteo a cero (se asumen 0 por defecto al leer).
+function podarEvento(ev) {
+  if (!ev || !Array.isArray(ev.jornadas)) return ev;
+  return {
+    ...ev,
+    jornadas: ev.jornadas.map((j) => {
+      if (!j || !j.conteo) return j;
+      const conteo = {};
+      for (const u of Object.keys(j.conteo)) {
+        const cu = {};
+        for (const pid of Object.keys(j.conteo[u] || {})) {
+          const c = j.conteo[u][pid];
+          if (c && ((c.inicial || 0) !== 0 || (c.final || 0) !== 0)) cu[pid] = c;
+        }
+        if (Object.keys(cu).length) conteo[u] = cu;
+      }
+      return { ...j, conteo };
+    }),
+  };
+}
+function podarEstado(estado) {
+  if (!estado || !Array.isArray(estado.eventos)) return estado;
+  return { ...estado, eventos: estado.eventos.map(podarEvento) };
+}
+
 // ─────────────────────────────────────────────────────────────
 //  EVENTRACK · Jota Beltrán
 //  App multi-evento de inventario y control de stock, con JORNADAS.
@@ -232,7 +257,7 @@ export default function App() {
     setSaving(true);
     try {
       const merged = await saveWithMerge((server) =>
-        mergeEstado(baseRef.current, { eventos: eventosRef.current }, server && Array.isArray(server.eventos) ? server : { eventos: [] })
+        podarEstado(mergeEstado(baseRef.current, { eventos: eventosRef.current }, server && Array.isArray(server.eventos) ? server : { eventos: [] }))
       );
       if (merged) {
         const json = JSON.stringify(merged);
@@ -557,12 +582,9 @@ function EventoDetalle({ evento, role, updateEvento, onGuardar }) {
   );
 }
 
-function emptyJornada(fecha, evento) {
-  const conteo = {};
-  evento.ubicaciones.forEach((u) => {
-    conteo[u] = Object.fromEntries(evento.productos.map((p) => [p.id, { inicial: 0, final: 0 }]));
-  });
-  return { id: "j" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), fecha, conteo };
+// Jornada sin conteo: las celdas se crean solo al ponerles valor (almacenamiento disperso).
+function emptyJornada(fecha) {
+  return { id: "j" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), fecha, conteo: {} };
 }
 
 function JornadasView({ evento, upd, jornadaActivaId, setJornadaActivaId }) {
@@ -676,20 +698,7 @@ function ConfigView({ evento, upd }) {
           .map((p, i) => ({ id: "p" + t + i, ...p }));
         const productos = [...ev.productos, ...prodNuevos];
 
-        const jornadas = ev.jornadas.map((j) => {
-          const conteo = { ...j.conteo };
-          ubicNuevas.forEach((u) => {
-            conteo[u] = Object.fromEntries(productos.map((p) => [p.id, { inicial: 0, final: 0 }]));
-          });
-          ev.ubicaciones.forEach((u) => {
-            const base = { ...(conteo[u] || {}) };
-            prodNuevos.forEach((p) => { base[p.id] = base[p.id] || { inicial: 0, final: 0 }; });
-            conteo[u] = base;
-          });
-          return { ...j, conteo };
-        });
-
-        return { ...ev, ubicaciones, productos, jornadas };
+        return { ...ev, ubicaciones, productos };
       });
 
       setImportMsg(`Importado: +${datos.ubicaciones.length} ubic., +${datos.productos.length} prod. (se omiten los repetidos).`);
@@ -704,14 +713,7 @@ function ConfigView({ evento, upd }) {
   const addUbic = () => {
     const n = nuevaUbic.trim();
     if (!n || evento.ubicaciones.includes(n)) return;
-    upd((ev) => ({
-      ...ev,
-      ubicaciones: [...ev.ubicaciones, n],
-      jornadas: ev.jornadas.map((j) => ({
-        ...j,
-        conteo: { ...j.conteo, [n]: Object.fromEntries(ev.productos.map((p) => [p.id, { inicial: 0, final: 0 }])) },
-      })),
-    }));
+    upd((ev) => ({ ...ev, ubicaciones: [...ev.ubicaciones, n] }));
     setNuevaUbic("");
   };
   const removeUbic = (n) => upd((ev) => ({
@@ -725,15 +727,7 @@ function ConfigView({ evento, upd }) {
     if (!n) return;
     const id = "p" + Date.now().toString(36);
     const prod = { id, nombre: n, categoria: pCat.trim() || "Otros", unidad: pUnidad.trim() || "ud" };
-    upd((ev) => ({
-      ...ev,
-      productos: [...ev.productos, prod],
-      jornadas: ev.jornadas.map((j) => {
-        const c = { ...j.conteo };
-        ev.ubicaciones.forEach((u) => { c[u] = { ...c[u], [id]: { inicial: 0, final: 0 } }; });
-        return { ...j, conteo: c };
-      }),
-    }));
+    upd((ev) => ({ ...ev, productos: [...ev.productos, prod] }));
     setPNombre(""); setPCat(""); setPUnidad("");
   };
   const removeProd = (pid) => upd((ev) => ({
@@ -894,7 +888,7 @@ function ConteoView({ evento, role, upd, jornada, jornadaActivaId, setJornadaAct
         if (j.id !== jornada.id) return j;
         const conteo = { ...j.conteo };
         const cu = { ...(conteo[ubicActiva] || {}) };
-        ev.productos.forEach((p) => { cu[p.id] = { ...(cu[p.id] || { inicial: 0, final: 0 }), final: 0 }; });
+        Object.keys(cu).forEach((pid) => { cu[pid] = { ...cu[pid], final: 0 }; });
         conteo[ubicActiva] = cu;
         const conf = { ...(j.confirmado || {}) }; delete conf[ubicActiva];
         const rh = { ...(j.realizadoHora || {}) }; delete rh[ubicActiva];
