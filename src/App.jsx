@@ -802,6 +802,24 @@ function ConteoView({ evento, role, upd, jornada, jornadaActivaId, setJornadaAct
   };
   const puedeAvanzar = !puedeOperar || !!realizadoPor.trim();
 
+  const limpiarInventario = () => {
+    if (!puedeContar) return;
+    if (!confirm(`¿Limpiar el Final de ${ubicActiva} en ${fechaLabel(jornada.fecha)}?\nSe pondrá a cero el Final de todos sus productos (el Inicial se mantiene) y se quitará la confirmación.`)) return;
+    upd((ev) => ({
+      ...ev,
+      jornadas: ev.jornadas.map((j) => {
+        if (j.id !== jornada.id) return j;
+        const conteo = { ...j.conteo };
+        const cu = { ...(conteo[ubicActiva] || {}) };
+        ev.productos.forEach((p) => { cu[p.id] = { ...(cu[p.id] || { inicial: 0, final: 0 }), final: 0 }; });
+        conteo[ubicActiva] = cu;
+        const conf = { ...(j.confirmado || {}) }; delete conf[ubicActiva];
+        const rh = { ...(j.realizadoHora || {}) }; delete rh[ubicActiva];
+        return { ...j, conteo, confirmado: conf, realizadoHora: rh };
+      }),
+    }));
+  };
+
   const prodNombre = (pid) => { const p = evento.productos.find((x) => x.id === pid); return p ? p.nombre : pid; };
   const movimientosUbic = (jornada.movimientos || []).filter((m) => m.ubic === ubicActiva || (m.tipo === "traspaso" && m.destino === ubicActiva));
   const addMovimiento = () => {
@@ -944,6 +962,10 @@ function ConteoView({ evento, role, upd, jornada, jornadaActivaId, setJornadaAct
         <input type="text" value={realizadoPor} placeholder="Nombre de quien realiza este inventario" disabled={!puedeOperar} onChange={(e) => setRealizadoPor(e.target.value)} style={{ ...styles.textInput, ...(puedeOperar ? {} : styles.inputDisabled) }} />
         <div style={styles.dimText}>La hora se marca automáticamente al confirmar el inventario.</div>
       </div>
+
+      {puedeContar && (
+        <button onClick={limpiarInventario} style={{ ...styles.deleteBtn, marginBottom: 16 }}>🧹 Limpiar Final de {ubicActiva}</button>
+      )}
 
       {!puedeAvanzar ? (
         <div style={{ ...styles.empty, color: COLORS.gold }}>Indica quién realiza el inventario (obligatorio) para empezar a contar.</div>
