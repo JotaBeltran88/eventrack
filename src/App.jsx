@@ -979,15 +979,10 @@ function ConteoView({ evento, role, upd, jornada, jornadaActivaId, setJornadaAct
         ))}
       </div>
 
-      <div style={styles.formCard}>
-        <label style={styles.fieldLabel}>Realizado por *</label>
-        <input type="text" value={realizadoPor} placeholder="Nombre de quien realiza este inventario" disabled={!puedeOperar} onChange={(e) => setRealizadoPor(e.target.value)} style={{ ...styles.textInput, ...(puedeOperar ? {} : styles.inputDisabled) }} />
-        <div style={styles.dimText}>La hora se marca automáticamente al confirmar el inventario.</div>
+      <div style={{ marginBottom: 14 }}>
+        <label style={{ ...styles.fieldLabel, display: "block", marginBottom: 6 }}>Realizado por *</label>
+        <input type="text" value={realizadoPor} placeholder="Nombre de quien cuenta" disabled={!puedeOperar} onChange={(e) => setRealizadoPor(e.target.value)} style={{ ...styles.textInput, width: "100%", ...(puedeOperar ? {} : styles.inputDisabled) }} />
       </div>
-
-      {puedeContar && (
-        <button onClick={limpiarInventario} style={{ ...styles.deleteBtn, marginBottom: 16 }}>🧹 Limpiar Final de {ubicActiva}</button>
-      )}
 
       {!puedeAvanzar ? (
         <div style={{ ...styles.empty, color: COLORS.gold }}>Indica quién realiza el inventario (obligatorio) para empezar a contar.</div>
@@ -1000,10 +995,13 @@ function ConteoView({ evento, role, upd, jornada, jornadaActivaId, setJornadaAct
             : <span style={{ color: COLORS.dim }}>{ubicActiva}: pendiente de confirmar</span>}
           <span style={{ color: COLORS.dim }}>{"  ·  "}{confirmadasCount}/{evento.ubicaciones.length} ubicaciones confirmadas</span>
         </span>
-        {puedeContar && (confirmado
-          ? <button onClick={() => setConfirmado(false)} style={styles.smallBtn}>Reabrir</button>
-          : <button onClick={() => setConfirmado(true)} style={styles.addBtn}>✓ Confirmar inventario</button>
-        )}
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
+          {puedeContar && <button onClick={limpiarInventario} style={styles.linkBtn}>🧹 Limpiar Final</button>}
+          {puedeContar && (confirmado
+            ? <button onClick={() => setConfirmado(false)} style={styles.smallBtn}>Reabrir</button>
+            : <button onClick={() => setConfirmado(true)} style={styles.addBtn}>✓ Confirmar</button>
+          )}
+        </div>
       </div>
 
       {!jornadaEditable && (
@@ -1021,7 +1019,7 @@ function ConteoView({ evento, role, upd, jornada, jornadaActivaId, setJornadaAct
       </div>
 
       {!catSel ? (
-        <div style={styles.empty}>Elige una familia de productos para ver sus referencias.</div>
+        <div style={{ ...styles.dimText, marginBottom: 20 }}>Elige una familia para ver sus referencias.</div>
       ) : (
         <div style={{ marginBottom: 26 }}>
           <div style={styles.dimText}>El Inicial es el stock con el que empezó la ubicación. Si hay entradas, salidas o traspasos, se muestran debajo del producto con el disponible resultante. Consumo = Disponible − Final.</div>
