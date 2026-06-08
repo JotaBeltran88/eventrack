@@ -243,9 +243,9 @@ export default function App() {
           {eventoActivo && (
             <button onClick={() => { setEventoActivoId(null); setShowAcceso(false); setShowPapelera(false); }} style={styles.volverBtn}>‹ Volver a eventos</button>
           )}
-          <div style={{ cursor: "pointer" }} onClick={() => { setEventoActivoId(null); setShowAcceso(false); setShowPapelera(false); }}>
-            <div style={styles.kicker}>J.B.APP</div>
-            <h1 style={styles.title}>Event<span style={{ color: COLORS.gold }}>rack</span></h1>
+          <div style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: 10 }} onClick={() => { setEventoActivoId(null); setShowAcceso(false); setShowPapelera(false); }}>
+            <img src="/icon.png" alt="Eventracker" style={{ height: 44, width: 44, objectFit: "contain" }} />
+            <h1 style={styles.title}>Eventracker</h1>
           </div>
         </div>
         <div style={styles.headerRight}>
@@ -1347,8 +1347,7 @@ function Login({ onLogin }) {
   return (
     <div style={{ ...styles.app, display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", minHeight: "100vh" }}>
       <style>{globalCSS}</style>
-      <div style={styles.kicker}>J.B.APP</div>
-      <h1 style={{ ...styles.title, fontSize: 40, marginBottom: 6 }}>Event<span style={{ color: COLORS.gold }}>rack</span></h1>
+      <img src="/logo.png" alt="Eventracker" style={{ width: 230, maxWidth: "72%", height: "auto", marginBottom: 6 }} />
       <p style={{ color: COLORS.dim, marginBottom: 22, fontSize: 14 }}>Introduce tu código de acceso</p>
       <div style={{ ...styles.formCard, width: "100%", maxWidth: 320, marginTop: 0 }}>
         <input
