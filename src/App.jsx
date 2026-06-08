@@ -843,7 +843,6 @@ function ConteoView({ evento, role, upd, jornada, jornadaActivaId, setJornadaAct
       </div>
 
       <div style={styles.formCard}>
-        <div style={styles.formCardTitle}>Antes de empezar · {ubicActiva}</div>
         <label style={styles.fieldLabel}>Realizado por *</label>
         <input type="text" value={realizadoPor} placeholder="Nombre de quien realiza este inventario" disabled={!puedeEditar} onChange={(e) => setRealizadoPor(e.target.value)} style={{ ...styles.textInput, ...(puedeEditar ? {} : styles.inputDisabled) }} />
         <label style={styles.fieldLabel}>Hora *</label>
