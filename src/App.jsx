@@ -285,6 +285,7 @@ function EventosList({ eventos, role, onOpen, onAddCompleto, onRemove, updateEve
   const [editNombre, setEditNombre] = useState("");
   const [editFecha, setEditFecha] = useState("");
   const [pasadosAbierto, setPasadosAbierto] = useState(false);
+  const [creando, setCreando] = useState(false);
   const empezarEdicion = (ev) => { setEditId(ev.id); setEditNombre(ev.nombre); setEditFecha(ev.fecha || ""); };
   const guardarEdicion = () => {
     updateEvento(editId, (ev) => ({ ...ev, nombre: editNombre.trim() || ev.nombre, fecha: editFecha }));
@@ -359,11 +360,13 @@ function EventosList({ eventos, role, onOpen, onAddCompleto, onRemove, updateEve
   const enCurso = eventos.filter((ev) => !ev.borrado && !esEventoPasado(ev)).sort(porInicioAsc);
   const pasados = eventos.filter((ev) => !ev.borrado && esEventoPasado(ev)).sort(porFinDesc);
 
-  return (
-    <div>
-      {esAdmin && (
+  // Página aparte para crear un evento nuevo.
+  if (esAdmin && creando) {
+    return (
+      <div>
+        <button onClick={() => setCreando(false)} style={styles.volverBtn}>‹ Volver</button>
+        <div style={{ ...styles.sectionTitle, marginTop: 14 }}>Nuevo evento</div>
         <div style={styles.formCard}>
-          <div style={styles.formCardTitle}>Nuevo evento</div>
           <input value={nombre} onChange={(e) => setNombre(e.target.value)} placeholder="Nombre del evento" style={styles.textInput} />
           <div style={styles.formRow}>
             <button onClick={() => setTipo("single")} style={{ ...styles.chip, ...(tipo === "single" ? styles.chipActive : {}) }}>Un solo día</button>
@@ -384,10 +387,20 @@ function EventosList({ eventos, role, onOpen, onAddCompleto, onRemove, updateEve
             Elige si el evento es de un solo día o de varios. En "varios días" se crean automáticamente las jornadas del rango. Las ubicaciones y productos se añaden en el siguiente paso, al configurar el evento.
           </div>
         </div>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      {esAdmin && (
+        <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 22 }}>
+          <button onClick={() => setCreando(true)} style={styles.addBtn}>+ Nuevo evento</button>
+        </div>
       )}
 
-      <div style={{ ...styles.sectionTitle, marginTop: esAdmin ? 30 : 0 }}>Eventos en curso</div>
-      {enCurso.length === 0 && <div style={styles.empty}>{esAdmin ? "No hay eventos en curso. Crea uno arriba." : "No hay eventos en curso."}</div>}
+      <div style={styles.sectionTitle}>Eventos en curso</div>
+      {enCurso.length === 0 && <div style={styles.empty}>{esAdmin ? "No hay eventos en curso. Crea uno con «+ Nuevo evento»." : "No hay eventos en curso."}</div>}
       <div style={{ display: "grid", gap: 10, marginBottom: 28 }}>
         {enCurso.map(tarjeta)}
       </div>
