@@ -1,6 +1,48 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import * as XLSX from "xlsx";
-import { loadState, saveState, subscribeState, login, setCodes } from "./storage";
+import { loadState, saveState, saveWithMerge, subscribeState, login, setCodes } from "./storage";
+
+// ── Fusión a 3 bandas (base, local, servidor) para guardado concurrente ──
+// Permite que dos personas editen barras distintas a la vez sin pisarse.
+function deepEqual(a, b) { return JSON.stringify(a) === JSON.stringify(b); }
+function isObj(x) { return x && typeof x === "object" && !Array.isArray(x); }
+function tieneId(x) { return isObj(x) && "id" in x; }
+function merge3(base, mine, theirs) {
+  if (mine === undefined) {
+    if (base !== undefined && deepEqual(base, theirs)) return undefined; // yo borré, ellos no tocaron
+    return theirs;
+  }
+  if (theirs === undefined) {
+    if (base !== undefined && deepEqual(base, mine)) return undefined; // ellos borraron, yo no toqué
+    return mine;
+  }
+  if (isObj(mine) && isObj(theirs)) {
+    const out = {};
+    const keys = new Set([...Object.keys(mine), ...Object.keys(theirs), ...(isObj(base) ? Object.keys(base) : [])]);
+    for (const k of keys) { const v = merge3(isObj(base) ? base[k] : undefined, mine[k], theirs[k]); if (v !== undefined) out[k] = v; }
+    return out;
+  }
+  if (Array.isArray(mine) && Array.isArray(theirs)) {
+    const baseArr = Array.isArray(base) ? base : [];
+    if (mine.every(tieneId) && theirs.every(tieneId)) {
+      const byId = (a) => { const m = {}; a.forEach((x) => (m[x.id] = x)); return m; };
+      const mMine = byId(mine), mTheirs = byId(theirs), mBase = byId(baseArr);
+      const res = []; const seen = new Set();
+      theirs.forEach((t) => { seen.add(t.id); const m = merge3(mBase[t.id], mMine[t.id], mTheirs[t.id]); if (m !== undefined) res.push(m); });
+      mine.forEach((mn) => { if (!seen.has(mn.id)) { const m = merge3(mBase[mn.id], mn, undefined); if (m !== undefined) res.push(m); } });
+      return res;
+    }
+    if (!deepEqual(mine, baseArr)) return mine;
+    return theirs;
+  }
+  if (deepEqual(mine, base)) return theirs; // yo no cambié → lo de ellos
+  if (deepEqual(theirs, base)) return mine;  // ellos no cambiaron → lo mío
+  return mine; // conflicto en el mismo campo → gana quien guarda
+}
+function mergeEstado(base, mine, theirs) {
+  const r = merge3(base || { eventos: [] }, mine || { eventos: [] }, theirs || { eventos: [] });
+  return r && Array.isArray(r.eventos) ? r : { eventos: (mine && mine.eventos) || [] };
+}
 
 // ─────────────────────────────────────────────────────────────
 //  EVENTRACK · Jota Beltrán
@@ -152,16 +194,23 @@ export default function App() {
     setShowPapelera(false);
   };
 
-  // Guarda la última versión sincronizada para no reescribir/recargar en bucle.
-  const lastSynced = useRef("");
+  const lastWritten = useRef("");                 // JSON de lo último que escribimos (anti-eco)
+  const baseRef = useRef({ eventos: [] });        // estado del servidor que conocemos (ancestro)
+  const baseJsonRef = useRef(JSON.stringify({ eventos: [] }));
+  const eventosRef = useRef([]);                  // valor local actual (para leer en callbacks)
+  useEffect(() => { eventosRef.current = eventos; }, [eventos]);
 
-  // Carga inicial desde Supabase + suscripción en tiempo real.
+  const fijarBase = (obj, json) => { baseRef.current = obj; baseJsonRef.current = json || JSON.stringify(obj); };
+
+  // Carga inicial + suscripción en tiempo real (fusiona lo entrante con lo local sin guardar).
   useEffect(() => {
     (async () => {
       try {
         const data = await loadState();
         if (data && Array.isArray(data.eventos)) {
-          lastSynced.current = JSON.stringify(data);
+          const json = JSON.stringify(data);
+          fijarBase(data, json);
+          lastWritten.current = json;
           setEventos(data.eventos);
         }
       } catch (e) { /* primera vez o sin conexión */ }
@@ -171,33 +220,40 @@ export default function App() {
     const unsub = subscribeState((data) => {
       if (!data || !Array.isArray(data.eventos)) return;
       const json = JSON.stringify(data);
-      if (json === lastSynced.current) return; // es nuestro propio cambio, lo ignoramos
-      lastSynced.current = json;
-      setEventos(data.eventos);
+      if (json === lastWritten.current) return; // nuestro propio cambio
+      const merged = mergeEstado(baseRef.current, { eventos: eventosRef.current }, data);
+      fijarBase(data, json);                     // su estado es el nuevo ancestro común
+      setEventos(merged.eventos);                // mantiene mis cambios sin guardar + los suyos
     });
     return unsub;
   }, []);
 
-  const save = useCallback(async (next) => {
+  const save = useCallback(async () => {
     setSaving(true);
     try {
-      await saveState(next);
-      lastSynced.current = JSON.stringify(next);
-      setDirty(false);
+      const merged = await saveWithMerge((server) =>
+        mergeEstado(baseRef.current, { eventos: eventosRef.current }, server && Array.isArray(server.eventos) ? server : { eventos: [] })
+      );
+      if (merged) {
+        const json = JSON.stringify(merged);
+        fijarBase(merged, json);
+        lastWritten.current = json;
+        setEventos(merged.eventos);
+        setDirty(false);
+      }
     } catch (e) { console.error("Error guardando", e); }
     setSaving(false);
   }, []);
 
-  // Guardado manual inmediato (botón "Guardar cambios").
-  const guardarAhora = useCallback(() => save({ eventos }), [save, eventos]);
+  const guardarAhora = save;
 
-  // Guardado automático (debounced) cuando cambian los datos localmente.
+  // Guardado automático (debounced) cuando lo local difiere del servidor conocido.
   useEffect(() => {
     if (!loaded) return;
     const json = JSON.stringify({ eventos });
-    if (json === lastSynced.current) { setDirty(false); return; } // nada nuevo
+    if (json === baseJsonRef.current) { setDirty(false); return; } // local == servidor
     setDirty(true);
-    const t = setTimeout(() => { save({ eventos }); }, 600);
+    const t = setTimeout(() => { save(); }, 600);
     return () => clearTimeout(t);
   }, [eventos, loaded, save]);
 

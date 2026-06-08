@@ -42,6 +42,45 @@ export async function saveState(obj) {
   if (error) console.error("Error guardando estado:", error.message);
 }
 
+// Lee la fila con su marca de versión (updated_at), para control de concurrencia.
+export async function loadStateRow() {
+  const { data, error } = await supabase
+    .from(TABLE)
+    .select("data, updated_at")
+    .eq("id", ROW_ID)
+    .maybeSingle();
+  if (error) { console.error("Error cargando fila:", error.message); return null; }
+  return data; // { data, updated_at } | null
+}
+
+// Guarda fusionando con lo último del servidor, con control de versión (CAS).
+// mergeFn(serverData) debe devolver el estado fusionado a escribir.
+// Devuelve el estado fusionado guardado, o null si no se pudo.
+export async function saveWithMerge(mergeFn, maxRetries = 5) {
+  for (let i = 0; i < maxRetries; i++) {
+    const row = await loadStateRow();
+    const server = row && row.data ? row.data : { eventos: [] };
+    const merged = mergeFn(server);
+    const nowIso = new Date().toISOString();
+    if (!row) {
+      const { error } = await supabase.from(TABLE).insert({ id: ROW_ID, data: merged, updated_at: nowIso });
+      if (!error) return merged;
+      continue; // alguien insertó a la vez → reintentar como update
+    }
+    const { data: upd, error } = await supabase
+      .from(TABLE)
+      .update({ data: merged, updated_at: nowIso })
+      .eq("id", ROW_ID)
+      .eq("updated_at", row.updated_at)
+      .select("id");
+    if (error) { console.error("Error guardando estado:", error.message); return null; }
+    if (upd && upd.length > 0) return merged; // nadie escribió en medio → éxito
+    // updated_at cambió (otro guardó) → reintentar con el estado más nuevo
+  }
+  console.warn("saveWithMerge: demasiados reintentos de concurrencia");
+  return null;
+}
+
 // Se suscribe a cambios en tiempo real. Llama a cb(data) cuando otro
 // dispositivo guarda. Devuelve una función para cancelar la suscripción.
 export function subscribeState(cb) {
