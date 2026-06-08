@@ -770,6 +770,19 @@ function ConteoView({ evento, role, upd, jornada, jornadaActivaId, setJornadaAct
     }));
   };
 
+  const realizadoPor = (jornada.realizadoPor && jornada.realizadoPor[ubicActiva]) || "";
+  const setRealizadoPor = (nombre) => {
+    upd((ev) => ({
+      ...ev,
+      jornadas: ev.jornadas.map((j) => {
+        if (j.id !== jornada.id) return j;
+        const rp = { ...(j.realizadoPor || {}) };
+        rp[ubicActiva] = nombre;
+        return { ...j, realizadoPor: rp };
+      }),
+    }));
+  };
+
   const setValor = (pid, campo, valor) => {
     if (!puedeEditar) return;
     const v = valor === "" ? 0 : Math.max(0, Number(valor));
@@ -808,6 +821,11 @@ function ConteoView({ evento, role, upd, jornada, jornadaActivaId, setJornadaAct
         {evento.ubicaciones.map((u) => (
           <button key={u} onClick={() => setUbicActiva(u)} style={{ ...styles.chip, ...(u === ubicActiva ? styles.chipActive : {}), ...(confirmadoUbic(u) && u !== ubicActiva ? styles.chipDone : {}) }}>{u}{confirmadoUbic(u) ? " ✓" : ""}</button>
         ))}
+      </div>
+
+      <div style={{ marginBottom: 14 }}>
+        <label style={{ ...styles.fieldLabel, display: "block", marginBottom: 6 }}>Inventario de {ubicActiva} · realizado por</label>
+        <input type="text" value={realizadoPor} placeholder="Nombre de quien realiza este inventario" disabled={!puedeEditar} onChange={(e) => setRealizadoPor(e.target.value)} style={{ ...styles.textInput, width: "100%", ...(puedeEditar ? {} : styles.inputDisabled) }} />
       </div>
 
       <div style={styles.confirmBar}>
@@ -953,6 +971,14 @@ function descargarJornadaExcel(evento, jornada) {
   if (!jornada) { alert("Selecciona una jornada para descargar su inventario."); return; }
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, hojaInventarioJornada(evento, jornada), "Inventario");
+  const resp = evento.ubicaciones.map((u) => ({
+    "Ubicación": u,
+    "Realizado por": (jornada.realizadoPor && jornada.realizadoPor[u]) || "",
+    "Confirmado": (jornada.confirmado && jornada.confirmado[u]) ? "Sí" : "No",
+  }));
+  const wsR = XLSX.utils.json_to_sheet(resp);
+  wsR["!cols"] = [{ wch: 20 }, { wch: 28 }, { wch: 12 }];
+  XLSX.utils.book_append_sheet(wb, wsR, "Responsables");
   XLSX.writeFile(wb, `Eventrack_${nombreSeguro(evento.nombre)}_${jornada.fecha || "sinfecha"}.xlsx`);
 }
 
