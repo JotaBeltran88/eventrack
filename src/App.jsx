@@ -773,8 +773,10 @@ function ConteoView({ evento, role, upd, jornada, jornadaActivaId, setJornadaAct
       jornadas: ev.jornadas.map((j) => {
         if (j.id !== jornada.id) return j;
         const conf = { ...(j.confirmado || {}) };
-        if (val) conf[ubicActiva] = true; else delete conf[ubicActiva];
-        return { ...j, confirmado: conf };
+        const rh = { ...(j.realizadoHora || {}) };
+        if (val) { conf[ubicActiva] = true; rh[ubicActiva] = horaActual(); }   // la hora se marca al confirmar
+        else { delete conf[ubicActiva]; delete rh[ubicActiva]; }                // al reabrir se borra
+        return { ...j, confirmado: conf, realizadoHora: rh };
       }),
     }));
   };
@@ -792,20 +794,7 @@ function ConteoView({ evento, role, upd, jornada, jornadaActivaId, setJornadaAct
         if (j.id !== jornada.id) return j;
         const rp = { ...(j.realizadoPor || {}) };
         rp[ubicActiva] = nombre;
-        const rh = { ...(j.realizadoHora || {}) };
-        if (nombre.trim() && !rh[ubicActiva]) rh[ubicActiva] = horaActual();
-        return { ...j, realizadoPor: rp, realizadoHora: rh };
-      }),
-    }));
-  };
-  const setRealizadoHora = (hora) => {
-    upd((ev) => ({
-      ...ev,
-      jornadas: ev.jornadas.map((j) => {
-        if (j.id !== jornada.id) return j;
-        const rh = { ...(j.realizadoHora || {}) };
-        rh[ubicActiva] = hora;
-        return { ...j, realizadoHora: rh };
+        return { ...j, realizadoPor: rp };
       }),
     }));
   };
@@ -873,8 +862,7 @@ function ConteoView({ evento, role, upd, jornada, jornadaActivaId, setJornadaAct
       <div style={styles.formCard}>
         <label style={styles.fieldLabel}>Realizado por *</label>
         <input type="text" value={realizadoPor} placeholder="Nombre de quien realiza este inventario" disabled={!puedeOperar} onChange={(e) => setRealizadoPor(e.target.value)} style={{ ...styles.textInput, ...(puedeOperar ? {} : styles.inputDisabled) }} />
-        <label style={styles.fieldLabel}>Hora *</label>
-        <input type="time" value={realizadoHora} disabled={!puedeOperar} onChange={(e) => setRealizadoHora(e.target.value)} style={{ ...styles.textInput, ...(puedeOperar ? {} : styles.inputDisabled) }} />
+        <div style={styles.dimText}>La hora se marca automáticamente al confirmar el inventario.</div>
       </div>
 
       {!puedeAvanzar ? (
@@ -884,7 +872,7 @@ function ConteoView({ evento, role, upd, jornada, jornadaActivaId, setJornadaAct
       <div style={styles.confirmBar}>
         <span style={{ fontSize: 13 }}>
           {confirmado
-            ? <span style={{ color: COLORS.green, fontWeight: 600 }}>✓ {ubicActiva} confirmada</span>
+            ? <span style={{ color: COLORS.green, fontWeight: 600 }}>✓ {ubicActiva} confirmada{realizadoHora ? ` · ${realizadoHora}` : ""}</span>
             : <span style={{ color: COLORS.dim }}>{ubicActiva}: pendiente de confirmar</span>}
           <span style={{ color: COLORS.dim }}>{"  ·  "}{confirmadasCount}/{evento.ubicaciones.length} ubicaciones confirmadas</span>
         </span>
