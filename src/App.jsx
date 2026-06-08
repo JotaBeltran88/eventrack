@@ -906,7 +906,7 @@ function ConteoView({ evento, role, upd, jornada, jornadaActivaId, setJornadaAct
         <div style={styles.empty}>Elige una familia de productos para ver sus referencias.</div>
       ) : (
         <div style={{ marginBottom: 26 }}>
-          <div style={styles.dimText}>El Inicial es el stock disponible: arrastre del día anterior + entradas/traspasos recibidos − salidas/traspasos enviados. Consumo = Inicial − Final.</div>
+          <div style={styles.dimText}>El Inicial es el stock con el que empezó la ubicación. Si hay entradas, salidas o traspasos, se muestran debajo del producto con el disponible resultante. Consumo = Disponible − Final.</div>
           <div style={styles.tableHead}>
             <span style={{ flex: 2 }}>Producto</span>
             <span style={styles.colNum}>Inicial</span><span style={styles.colNum}>Final</span><span style={styles.colNum}>Consumo</span>
@@ -918,9 +918,9 @@ function ConteoView({ evento, role, upd, jornada, jornadaActivaId, setJornadaAct
               <div key={p.id} style={styles.row}>
                 <span style={{ flex: 2 }}>
                   <span style={{ color: COLORS.cream }}>{p.nombre}</span><span style={styles.unidad}> · {p.unidad}</span>
-                  {(t.ent > 0 || t.sal > 0) && <span style={styles.movHint}>{t.ent > 0 ? ` ▲ +${t.ent}` : ""}{t.sal > 0 ? ` ▼ −${t.sal}` : ""}</span>}
+                  {(t.ent > 0 || t.sal > 0) && <div style={styles.movHint}>{t.ent > 0 ? `▲ +${t.ent} ` : ""}{t.sal > 0 ? `▼ −${t.sal} ` : ""}· disponible {t.ini}</div>}
                 </span>
-                <input type="number" min="0" value={t.ini || ""} placeholder="0" disabled={!puedeEditar} onChange={(e) => { const v = e.target.value === "" ? 0 : Math.max(0, Number(e.target.value)); setValor(p.id, "inicial", Math.max(0, v - t.ent + t.sal)); }} style={{ ...styles.input, ...(puedeEditar ? {} : styles.inputDisabled) }} />
+                <input type="number" min="0" value={c.inicial || ""} placeholder="0" disabled={!puedeEditar} onChange={(e) => setValor(p.id, "inicial", e.target.value)} style={{ ...styles.input, ...(puedeEditar ? {} : styles.inputDisabled) }} />
                 <input type="number" min="0" value={c.final || ""} placeholder="0" disabled={!puedeEditar} onChange={(e) => setValor(p.id, "final", e.target.value)} style={{ ...styles.input, ...(puedeEditar ? {} : styles.inputDisabled) }} />
                 <span style={{ ...styles.colNum, color: t.con > 0 ? COLORS.gold : COLORS.dim, fontWeight: 600 }}>{t.con}</span>
               </div>
@@ -1357,7 +1357,7 @@ const styles = {
   input: { width: 78, textAlign: "center", background: COLORS.panel2, border: `1px solid ${COLORS.line}`, borderRadius: 7, color: COLORS.cream, fontSize: 14, padding: "7px 4px", fontFamily: "'Outfit', sans-serif" },
   inputDisabled: { opacity: 0.5, cursor: "not-allowed" },
   movRow: { display: "flex", alignItems: "center", gap: 8, padding: "8px 0", borderBottom: `1px solid ${COLORS.panel2}` },
-  movHint: { fontSize: 11, color: COLORS.dim, marginLeft: 6, whiteSpace: "nowrap" },
+  movHint: { fontSize: 11, color: COLORS.gold, marginTop: 2, fontWeight: 600 },
   toggleBtn: { border: "1px solid", fontSize: 11, fontWeight: 600, padding: "4px 9px", borderRadius: 14, whiteSpace: "nowrap", background: "transparent" },
   toggleOpen: { borderColor: COLORS.green, color: COLORS.green },
   toggleLocked: { borderColor: COLORS.goldDim, color: COLORS.dim },
