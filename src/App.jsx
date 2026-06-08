@@ -1023,13 +1023,10 @@ function ConteoView({ evento, role, upd, jornada, jornadaActivaId, setJornadaAct
     <div>
       <JornadaSelector evento={evento} jornadaActivaId={jornadaActivaId} setJornadaActivaId={setJornadaActivaId} />
 
-      <div style={{ ...styles.formCard, marginTop: 0 }}>
-        <div onClick={() => setMostrarPapel((v) => !v)} style={{ ...styles.collapseHeader, marginBottom: mostrarPapel ? 10 : 0 }}>
-          <span style={styles.formCardTitle}>Plantilla e importación (papel)</span>
-          <span style={styles.collapseMeta}>{mostrarPapel ? "▲" : "▼"}</span>
-        </div>
+      <div style={{ marginBottom: 16 }}>
+        <button onClick={() => setMostrarPapel((v) => !v)} style={styles.linkBtn}>{mostrarPapel ? "▲" : "▼"} Plantilla / importar</button>
         {mostrarPapel && (
-          <>
+          <div style={{ ...styles.formCard, marginTop: 10 }}>
             <div style={styles.dimText}>Descarga la plantilla en blanco para contar a mano. Cuando la tengas rellena, impórtala para volcar el Inicial y el Final en la jornada seleccionada ({fechaLabel(jornada.fecha)}).</div>
             <div style={styles.formRow}>
               <button onClick={() => descargarPlantillaInventario(evento)} style={styles.smallBtn}>↓ Descargar plantilla</button>
@@ -1037,7 +1034,7 @@ function ConteoView({ evento, role, upd, jornada, jornadaActivaId, setJornadaAct
             </div>
             <input ref={invFileRef} type="file" accept=".xlsx,.xls" onChange={importarInventario} style={{ display: "none" }} />
             {importInvMsg && <div style={{ color: COLORS.green, fontSize: 13 }}>{importInvMsg}</div>}
-          </>
+          </div>
         )}
       </div>
 
@@ -1056,22 +1053,6 @@ function ConteoView({ evento, role, upd, jornada, jornadaActivaId, setJornadaAct
         <div style={{ ...styles.empty, color: COLORS.gold }}>Indica quién realiza el inventario (obligatorio) para empezar a contar.</div>
       ) : (
       <>
-      <div style={styles.confirmBar}>
-        <span style={{ fontSize: 13 }}>
-          {confirmado
-            ? <span style={{ color: COLORS.green, fontWeight: 600 }}>✓ {ubicActiva} confirmada{realizadoHora ? ` · ${realizadoHora}` : ""}</span>
-            : <span style={{ color: COLORS.dim }}>{ubicActiva}: pendiente de confirmar</span>}
-          <span style={{ color: COLORS.dim }}>{"  ·  "}{confirmadasCount}/{evento.ubicaciones.length} ubicaciones confirmadas</span>
-        </span>
-        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
-          {puedeContar && <button onClick={limpiarInventario} style={styles.linkBtn}>🧹 Limpiar Final</button>}
-          {puedeContar && (confirmado
-            ? <button onClick={() => setConfirmado(false)} style={styles.smallBtn}>Reabrir</button>
-            : <button onClick={() => setConfirmado(true)} style={styles.addBtn}>✓ Confirmar</button>
-          )}
-        </div>
-      </div>
-
       {!jornadaEditable && (
         <div style={{ ...styles.empty, color: COLORS.gold, marginBottom: 16 }}>🔒 Esta jornada está en solo lectura. Un administrador debe habilitarla para poder modificarla.</div>
       )}
@@ -1164,6 +1145,22 @@ function ConteoView({ evento, role, upd, jornada, jornadaActivaId, setJornadaAct
         )}
         </>
         )}
+      </div>
+
+      <div style={styles.confirmBar}>
+        <span style={{ fontSize: 13 }}>
+          {confirmado
+            ? <span style={{ color: COLORS.green, fontWeight: 600 }}>✓ {ubicActiva} confirmada{realizadoHora ? ` · ${realizadoHora}` : ""}</span>
+            : <span style={{ color: COLORS.dim }}>{ubicActiva}: pendiente de confirmar</span>}
+          <span style={{ color: COLORS.dim }}>{"  ·  "}{confirmadasCount}/{evento.ubicaciones.length} ubicaciones confirmadas</span>
+        </span>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
+          {puedeContar && <button onClick={limpiarInventario} style={styles.linkBtn}>🧹 Limpiar Final</button>}
+          {puedeContar && (confirmado
+            ? <button onClick={() => setConfirmado(false)} style={styles.smallBtn}>Reabrir</button>
+            : <button onClick={() => setConfirmado(true)} style={styles.addBtn}>✓ Confirmar</button>
+          )}
+        </div>
       </div>
       </>
       )}
