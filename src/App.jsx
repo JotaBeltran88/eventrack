@@ -13,10 +13,12 @@ import { loadState, saveState, subscribeState, login, setCodes } from "./storage
 //  Datos compartidos persistentes en la nube (Supabase, ver src/storage.js).
 // ─────────────────────────────────────────────────────────────
 
+// Tema "SaaS Claro": fondo claro, acento índigo. Se mantienen los nombres
+// semánticos (gold = acento, cream = texto principal) para no tocar los estilos.
 const COLORS = {
-  bg: "#0e0b08", panel: "#1a1410", panel2: "#221a13", line: "#3a2c1f",
-  gold: "#d9a441", goldDim: "#8a6a2c", cream: "#f2e8d8", dim: "#9b8a73",
-  green: "#7fae6b", red: "#cc6a55",
+  bg: "#f7f8fa", panel: "#ffffff", panel2: "#f1f2f6", line: "#e6e8ee",
+  gold: "#4f46e5", goldDim: "#8b90a8", cream: "#1f2430", dim: "#6b7280",
+  green: "#1a9d5f", red: "#dc2626",
 };
 
 function nuevoEvento(nombre, fecha) {
