@@ -128,6 +128,7 @@ function descargarPlantillaBlanco() {
 export default function App() {
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [dirty, setDirty] = useState(false);
   const [eventos, setEventos] = useState([]);
   const [eventoActivoId, setEventoActivoId] = useState(null);
   const [session, setSession] = useState(() => {
@@ -179,26 +180,33 @@ export default function App() {
 
   const save = useCallback(async (next) => {
     setSaving(true);
-    try { await saveState(next); }
-    catch (e) { console.error("Error guardando", e); }
+    try {
+      await saveState(next);
+      lastSynced.current = JSON.stringify(next);
+      setDirty(false);
+    } catch (e) { console.error("Error guardando", e); }
     setSaving(false);
   }, []);
 
-  // Guardado manual inmediato (botón "Guardar").
+  // Guardado manual inmediato (botón "Guardar cambios").
   const guardarAhora = useCallback(() => save({ eventos }), [save, eventos]);
 
   // Guardado automático (debounced) cuando cambian los datos localmente.
   useEffect(() => {
     if (!loaded) return;
-    const payload = { eventos };
-    const json = JSON.stringify(payload);
-    if (json === lastSynced.current) return; // nada nuevo que guardar
-    const t = setTimeout(() => {
-      lastSynced.current = json;
-      save(payload);
-    }, 600);
+    const json = JSON.stringify({ eventos });
+    if (json === lastSynced.current) { setDirty(false); return; } // nada nuevo
+    setDirty(true);
+    const t = setTimeout(() => { save({ eventos }); }, 600);
     return () => clearTimeout(t);
   }, [eventos, loaded, save]);
+
+  // Aviso al cerrar/recargar si quedan cambios sin guardar.
+  useEffect(() => {
+    const handler = (e) => { if (dirty || saving) { e.preventDefault(); e.returnValue = ""; } };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [dirty, saving]);
 
   const updateEvento = (id, updater) =>
     setEventos((prev) => prev.map((ev) => (ev.id === id ? updater(ev) : ev)));
@@ -249,7 +257,11 @@ export default function App() {
           </div>
         </div>
         <div style={styles.headerRight}>
-          <span style={styles.saveTag}>{saving ? "Guardando…" : "Guardado ✓"}</span>
+          {saving
+            ? <span style={styles.saveTag}>Guardando…</span>
+            : dirty
+              ? <button onClick={guardarAhora} style={styles.saveDirtyBtn}>● Guardar cambios</button>
+              : <span style={styles.saveTag}>Guardado ✓</span>}
           <span style={styles.roleTag}>{role === "admin" ? "Admin" : role === "inventario" ? "Inventario" : "Contador"}</span>
           {role === "admin" && (
             <button onClick={() => { setEventoActivoId(null); setShowPapelera(false); setShowAcceso(true); }} style={styles.linkBtn}>⚙ Acceso</button>
@@ -1482,6 +1494,7 @@ const styles = {
   kicker: { fontSize: 11, letterSpacing: "0.22em", color: COLORS.goldDim, fontWeight: 500, marginBottom: 6 },
   title: { fontFamily: "'Fraunces', serif", fontSize: 34, fontWeight: 900, margin: 0, color: COLORS.cream, letterSpacing: "-0.01em" },
   saveTag: { fontSize: 12, color: COLORS.goldDim, fontWeight: 500, whiteSpace: "nowrap" },
+  saveDirtyBtn: { background: COLORS.gold, border: "none", color: COLORS.bg, fontSize: 12, fontWeight: 700, padding: "5px 12px", borderRadius: 14, whiteSpace: "nowrap" },
   headerRight: { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" },
   roleTag: { fontSize: 11, fontWeight: 600, color: COLORS.bg, background: COLORS.gold, padding: "3px 10px", borderRadius: 12, letterSpacing: "0.04em", whiteSpace: "nowrap" },
   linkBtn: { background: "transparent", border: `1px solid ${COLORS.line}`, color: COLORS.dim, fontSize: 12, fontWeight: 500, padding: "5px 10px", borderRadius: 14, whiteSpace: "nowrap" },
