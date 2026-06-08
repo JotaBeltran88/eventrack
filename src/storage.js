@@ -70,12 +70,13 @@ export async function login(code) {
   return data || "";
 }
 
-// Cambia ambos códigos. Requiere el código de admin actual. Devuelve true si funcionó.
-export async function setCodes(currentAdmin, newAdmin, newContador) {
+// Cambia los códigos. Requiere el código de admin actual. Devuelve true si funcionó.
+export async function setCodes(currentAdmin, newAdmin, newContador, newInventario) {
   const { data, error } = await supabase.rpc("eventrack_set_codes", {
     current_admin: currentAdmin,
     new_admin: newAdmin,
     new_contador: newContador,
+    new_inventario: newInventario,
   });
   if (error) {
     console.error("Error cambiando códigos:", error.message);

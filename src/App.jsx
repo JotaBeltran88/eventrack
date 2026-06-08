@@ -250,7 +250,7 @@ export default function App() {
         </div>
         <div style={styles.headerRight}>
           <span style={styles.saveTag}>{saving ? "Guardando…" : "Guardado ✓"}</span>
-          <span style={styles.roleTag}>{role === "admin" ? "Admin" : "Contador"}</span>
+          <span style={styles.roleTag}>{role === "admin" ? "Admin" : role === "inventario" ? "Inventario" : "Contador"}</span>
           {role === "admin" && (
             <button onClick={() => { setEventoActivoId(null); setShowPapelera(false); setShowAcceso(true); }} style={styles.linkBtn}>⚙ Acceso</button>
           )}
@@ -758,7 +758,11 @@ function ConteoView({ evento, role, upd, jornada, jornadaActivaId, setJornadaAct
   if (!jornada) return (<div><JornadaSelector evento={evento} jornadaActivaId={jornadaActivaId} setJornadaActivaId={setJornadaActivaId} /><div style={styles.empty}>Selecciona una jornada.</div></div>);
 
   const getCell = (ubic, pid) => jornada.conteo?.[ubic]?.[pid] || { inicial: 0, final: 0 };
-  const puedeEditar = role === "admin" || jornada.editable !== false;
+  const esAdminC = role === "admin";
+  const jornadaEditable = esAdminC || jornada.editable !== false;
+  const puedeContar = jornadaEditable;                                          // los 3 roles cuentan el Final
+  const puedeInicial = jornadaEditable && (esAdminC || role === "inventario");  // solo Admin e Inventario tocan el Inicial / movimientos
+  const puedeOperar = puedeContar;                                             // puede registrar algo en esta jornada
 
   const confirmadoUbic = (u) => !!(jornada.confirmado && jornada.confirmado[u]);
   const confirmado = confirmadoUbic(ubicActiva);
@@ -805,11 +809,12 @@ function ConteoView({ evento, role, upd, jornada, jornadaActivaId, setJornadaAct
       }),
     }));
   };
-  const puedeAvanzar = !puedeEditar || !!realizadoPor.trim();
+  const puedeAvanzar = !puedeOperar || !!realizadoPor.trim();
 
   const prodNombre = (pid) => { const p = evento.productos.find((x) => x.id === pid); return p ? p.nombre : pid; };
   const movimientosUbic = (jornada.movimientos || []).filter((m) => m.ubic === ubicActiva || (m.tipo === "traspaso" && m.destino === ubicActiva));
   const addMovimiento = () => {
+    if (!puedeInicial) return;
     const cant = Number(movCant);
     if (!movProd || !cant || cant <= 0) return;
     if (movTipo === "traspaso" && (!movDest || movDest === ubicActiva)) return;
@@ -825,7 +830,8 @@ function ConteoView({ evento, role, upd, jornada, jornadaActivaId, setJornadaAct
   const removeMovimiento = (id) => upd((ev) => ({ ...ev, jornadas: ev.jornadas.map((j) => (j.id === jornada.id ? { ...j, movimientos: (j.movimientos || []).filter((m) => m.id !== id) } : j)) }));
 
   const setValor = (pid, campo, valor) => {
-    if (!puedeEditar) return;
+    if (campo === "inicial" && !puedeInicial) return;
+    if (campo === "final" && !puedeContar) return;
     const v = valor === "" ? 0 : Math.max(0, Number(valor));
     upd((ev) => {
       // Localiza la jornada siguiente por fecha: su Inicial heredará este Final.
@@ -866,9 +872,9 @@ function ConteoView({ evento, role, upd, jornada, jornadaActivaId, setJornadaAct
 
       <div style={styles.formCard}>
         <label style={styles.fieldLabel}>Realizado por *</label>
-        <input type="text" value={realizadoPor} placeholder="Nombre de quien realiza este inventario" disabled={!puedeEditar} onChange={(e) => setRealizadoPor(e.target.value)} style={{ ...styles.textInput, ...(puedeEditar ? {} : styles.inputDisabled) }} />
+        <input type="text" value={realizadoPor} placeholder="Nombre de quien realiza este inventario" disabled={!puedeOperar} onChange={(e) => setRealizadoPor(e.target.value)} style={{ ...styles.textInput, ...(puedeOperar ? {} : styles.inputDisabled) }} />
         <label style={styles.fieldLabel}>Hora *</label>
-        <input type="time" value={realizadoHora} disabled={!puedeEditar} onChange={(e) => setRealizadoHora(e.target.value)} style={{ ...styles.textInput, ...(puedeEditar ? {} : styles.inputDisabled) }} />
+        <input type="time" value={realizadoHora} disabled={!puedeOperar} onChange={(e) => setRealizadoHora(e.target.value)} style={{ ...styles.textInput, ...(puedeOperar ? {} : styles.inputDisabled) }} />
       </div>
 
       {!puedeAvanzar ? (
@@ -882,13 +888,13 @@ function ConteoView({ evento, role, upd, jornada, jornadaActivaId, setJornadaAct
             : <span style={{ color: COLORS.dim }}>{ubicActiva}: pendiente de confirmar</span>}
           <span style={{ color: COLORS.dim }}>{"  ·  "}{confirmadasCount}/{evento.ubicaciones.length} ubicaciones confirmadas</span>
         </span>
-        {puedeEditar && (confirmado
+        {puedeContar && (confirmado
           ? <button onClick={() => setConfirmado(false)} style={styles.smallBtn}>Reabrir</button>
           : <button onClick={() => setConfirmado(true)} style={styles.addBtn}>✓ Confirmar inventario</button>
         )}
       </div>
 
-      {!puedeEditar && (
+      {!jornadaEditable && (
         <div style={{ ...styles.empty, color: COLORS.gold, marginBottom: 16 }}>🔒 Esta jornada está en solo lectura. Un administrador debe habilitarla para poder modificarla.</div>
       )}
 
@@ -920,8 +926,8 @@ function ConteoView({ evento, role, upd, jornada, jornadaActivaId, setJornadaAct
                   <span style={{ color: COLORS.cream }}>{p.nombre}</span><span style={styles.unidad}> · {p.unidad}</span>
                   {(t.ent > 0 || t.sal > 0) && <div style={styles.movHint}>{t.ent > 0 ? `▲ +${t.ent} ` : ""}{t.sal > 0 ? `▼ −${t.sal} ` : ""}· disponible {t.ini}</div>}
                 </span>
-                <input type="number" min="0" value={c.inicial || ""} placeholder="0" disabled={!puedeEditar} onChange={(e) => setValor(p.id, "inicial", e.target.value)} style={{ ...styles.input, ...(puedeEditar ? {} : styles.inputDisabled) }} />
-                <input type="number" min="0" value={c.final || ""} placeholder="0" disabled={!puedeEditar} onChange={(e) => setValor(p.id, "final", e.target.value)} style={{ ...styles.input, ...(puedeEditar ? {} : styles.inputDisabled) }} />
+                <input type="number" min="0" value={c.inicial || ""} placeholder="0" disabled={!puedeInicial} onChange={(e) => setValor(p.id, "inicial", e.target.value)} style={{ ...styles.input, ...(puedeInicial ? {} : styles.inputDisabled) }} />
+                <input type="number" min="0" value={c.final || ""} placeholder="0" disabled={!puedeContar} onChange={(e) => setValor(p.id, "final", e.target.value)} style={{ ...styles.input, ...(puedeContar ? {} : styles.inputDisabled) }} />
                 <span style={{ ...styles.colNum, color: t.con > 0 ? COLORS.gold : COLORS.dim, fontWeight: 600 }}>{t.con}</span>
               </div>
             );
@@ -945,11 +951,11 @@ function ConteoView({ evento, role, upd, jornada, jornadaActivaId, setJornadaAct
                 <div style={{ color: COLORS.cream, fontSize: 13 }}>{etiqueta} · {prodNombre(m.productoId)} · {signo}{m.cantidad}</div>
                 {(m.comentario || m.hora) && <div style={{ color: COLORS.dim, fontSize: 12 }}>{m.hora ? m.hora + " · " : ""}{m.comentario}</div>}
               </div>
-              {puedeEditar && !recibido && <button onClick={() => removeMovimiento(m.id)} style={styles.xBtnSm}>×</button>}
+              {puedeInicial && !recibido && <button onClick={() => removeMovimiento(m.id)} style={styles.xBtnSm}>×</button>}
             </div>
           );
         })}
-        {puedeEditar && (
+        {puedeInicial && (
           <div style={{ borderTop: `1px solid ${COLORS.line}`, marginTop: 10, paddingTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
             <select value={movTipo} onChange={(e) => setMovTipo(e.target.value)} style={styles.select}>
               <option value="entrada">Entrada (reposición)</option>
@@ -1204,7 +1210,7 @@ function Login({ onLogin }) {
     setBusy(true); setErr("");
     try {
       const r = await login(c);
-      if (r === "admin" || r === "contador") { onLogin(r); return; }
+      if (r === "admin" || r === "inventario" || r === "contador") { onLogin(r); return; }
       setErr("Código incorrecto. Inténtalo de nuevo.");
     } catch (e) {
       setErr("No se pudo conectar. Revisa tu conexión.");
@@ -1263,20 +1269,21 @@ function AccessView({ onClose }) {
   const [actual, setActual] = useState("");
   const [nuevoAdmin, setNuevoAdmin] = useState("");
   const [nuevoContador, setNuevoContador] = useState("");
+  const [nuevoInventario, setNuevoInventario] = useState("");
   const [msg, setMsg] = useState(null);
   const [busy, setBusy] = useState(false);
 
   const guardar = async () => {
-    if (!actual || !nuevoAdmin || !nuevoContador) {
-      setMsg({ ok: false, t: "Rellena los tres campos." });
+    if (!actual || !nuevoAdmin || !nuevoContador || !nuevoInventario) {
+      setMsg({ ok: false, t: "Rellena los cuatro campos." });
       return;
     }
     setBusy(true); setMsg(null);
     try {
-      const ok = await setCodes(actual, nuevoAdmin.trim(), nuevoContador.trim());
+      const ok = await setCodes(actual, nuevoAdmin.trim(), nuevoContador.trim(), nuevoInventario.trim());
       if (ok) {
         setMsg({ ok: true, t: "Códigos actualizados correctamente." });
-        setActual(""); setNuevoAdmin(""); setNuevoContador("");
+        setActual(""); setNuevoAdmin(""); setNuevoContador(""); setNuevoInventario("");
       } else {
         setMsg({ ok: false, t: "El código de admin actual no es correcto." });
       }
@@ -1290,13 +1297,15 @@ function AccessView({ onClose }) {
     <div>
       <button onClick={onClose} style={styles.volverBtn}>‹ Volver</button>
       <div style={{ ...styles.sectionTitle, marginTop: 14 }}>Gestión de acceso</div>
-      <div style={styles.dimText}>Cambia los códigos de Admin y Contador. Necesitas el código de admin actual para confirmar el cambio.</div>
+      <div style={styles.dimText}>Cambia los códigos de Admin, Inventario y Contador. Necesitas el código de admin actual para confirmar el cambio.</div>
       <div style={styles.formCard}>
         <label style={styles.fieldLabel}>Código de admin actual</label>
         <input type="password" value={actual} onChange={(e) => setActual(e.target.value)} placeholder="Código actual" style={styles.textInput} />
         <label style={styles.fieldLabel}>Nuevo código de Admin</label>
         <input type="text" value={nuevoAdmin} onChange={(e) => setNuevoAdmin(e.target.value)} placeholder="Nuevo código de admin" style={styles.textInput} />
-        <label style={styles.fieldLabel}>Nuevo código de Contador</label>
+        <label style={styles.fieldLabel}>Nuevo código de Inventario (puede editar el inicial)</label>
+        <input type="text" value={nuevoInventario} onChange={(e) => setNuevoInventario(e.target.value)} placeholder="Nuevo código de inventario" style={styles.textInput} />
+        <label style={styles.fieldLabel}>Nuevo código de Contador (solo cuenta el final)</label>
         <input type="text" value={nuevoContador} onChange={(e) => setNuevoContador(e.target.value)} placeholder="Nuevo código de contador" style={styles.textInput} />
         <button onClick={guardar} disabled={busy} style={styles.addBtn}>{busy ? "Guardando…" : "Guardar códigos"}</button>
         {msg && <div style={{ color: msg.ok ? COLORS.green : COLORS.red, fontSize: 13 }}>{msg.t}</div>}
