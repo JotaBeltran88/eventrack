@@ -771,6 +771,11 @@ function ConteoView({ evento, role, upd, jornada, jornadaActivaId, setJornadaAct
   };
 
   const realizadoPor = (jornada.realizadoPor && jornada.realizadoPor[ubicActiva]) || "";
+  const realizadoHora = (jornada.realizadoHora && jornada.realizadoHora[ubicActiva]) || "";
+  const horaActual = () => {
+    const d = new Date();
+    return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  };
   const setRealizadoPor = (nombre) => {
     upd((ev) => ({
       ...ev,
@@ -778,10 +783,24 @@ function ConteoView({ evento, role, upd, jornada, jornadaActivaId, setJornadaAct
         if (j.id !== jornada.id) return j;
         const rp = { ...(j.realizadoPor || {}) };
         rp[ubicActiva] = nombre;
-        return { ...j, realizadoPor: rp };
+        const rh = { ...(j.realizadoHora || {}) };
+        if (nombre.trim() && !rh[ubicActiva]) rh[ubicActiva] = horaActual();
+        return { ...j, realizadoPor: rp, realizadoHora: rh };
       }),
     }));
   };
+  const setRealizadoHora = (hora) => {
+    upd((ev) => ({
+      ...ev,
+      jornadas: ev.jornadas.map((j) => {
+        if (j.id !== jornada.id) return j;
+        const rh = { ...(j.realizadoHora || {}) };
+        rh[ubicActiva] = hora;
+        return { ...j, realizadoHora: rh };
+      }),
+    }));
+  };
+  const puedeAvanzar = !puedeEditar || !!realizadoPor.trim();
 
   const setValor = (pid, campo, valor) => {
     if (!puedeEditar) return;
@@ -823,11 +842,18 @@ function ConteoView({ evento, role, upd, jornada, jornadaActivaId, setJornadaAct
         ))}
       </div>
 
-      <div style={{ marginBottom: 14 }}>
-        <label style={{ ...styles.fieldLabel, display: "block", marginBottom: 6 }}>Inventario de {ubicActiva} · realizado por</label>
-        <input type="text" value={realizadoPor} placeholder="Nombre de quien realiza este inventario" disabled={!puedeEditar} onChange={(e) => setRealizadoPor(e.target.value)} style={{ ...styles.textInput, width: "100%", ...(puedeEditar ? {} : styles.inputDisabled) }} />
+      <div style={styles.formCard}>
+        <div style={styles.formCardTitle}>Antes de empezar · {ubicActiva}</div>
+        <label style={styles.fieldLabel}>Realizado por *</label>
+        <input type="text" value={realizadoPor} placeholder="Nombre de quien realiza este inventario" disabled={!puedeEditar} onChange={(e) => setRealizadoPor(e.target.value)} style={{ ...styles.textInput, ...(puedeEditar ? {} : styles.inputDisabled) }} />
+        <label style={styles.fieldLabel}>Hora *</label>
+        <input type="time" value={realizadoHora} disabled={!puedeEditar} onChange={(e) => setRealizadoHora(e.target.value)} style={{ ...styles.textInput, ...(puedeEditar ? {} : styles.inputDisabled) }} />
       </div>
 
+      {!puedeAvanzar ? (
+        <div style={{ ...styles.empty, color: COLORS.gold }}>Indica quién realiza el inventario (obligatorio) para empezar a contar.</div>
+      ) : (
+      <>
       <div style={styles.confirmBar}>
         <span style={{ fontSize: 13 }}>
           {confirmado
@@ -877,6 +903,8 @@ function ConteoView({ evento, role, upd, jornada, jornadaActivaId, setJornadaAct
             );
           })}
         </div>
+      )}
+      </>
       )}
 
       <button onClick={() => descargarJornadaExcel(evento, jornada)} style={{ ...styles.smallBtn, width: "100%", marginTop: 18 }}>↓ Descargar inventario del día (Excel)</button>
@@ -974,10 +1002,11 @@ function descargarJornadaExcel(evento, jornada) {
   const resp = evento.ubicaciones.map((u) => ({
     "Ubicación": u,
     "Realizado por": (jornada.realizadoPor && jornada.realizadoPor[u]) || "",
+    "Hora": (jornada.realizadoHora && jornada.realizadoHora[u]) || "",
     "Confirmado": (jornada.confirmado && jornada.confirmado[u]) ? "Sí" : "No",
   }));
   const wsR = XLSX.utils.json_to_sheet(resp);
-  wsR["!cols"] = [{ wch: 20 }, { wch: 28 }, { wch: 12 }];
+  wsR["!cols"] = [{ wch: 20 }, { wch: 28 }, { wch: 10 }, { wch: 12 }];
   XLSX.utils.book_append_sheet(wb, wsR, "Responsables");
   XLSX.writeFile(wb, `Eventrack_${nombreSeguro(evento.nombre)}_${jornada.fecha || "sinfecha"}.xlsx`);
 }
