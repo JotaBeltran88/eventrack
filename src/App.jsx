@@ -751,6 +751,8 @@ function ConteoView({ evento, role, upd, jornada, jornadaActivaId, setJornadaAct
   const [movCant, setMovCant] = useState("");
   const [movDest, setMovDest] = useState("");
   const [movCom, setMovCom] = useState("");
+  const [importInvMsg, setImportInvMsg] = useState(null);
+  const invFileRef = React.useRef(null);
   if (evento.ubicaciones.length === 0 || evento.productos.length === 0)
     return <div style={styles.empty}>Necesitas ubicaciones y referencias (Configuración) para el conteo.</div>;
   if (evento.jornadas.length === 0)
@@ -818,6 +820,58 @@ function ConteoView({ evento, role, upd, jornada, jornadaActivaId, setJornadaAct
   };
   const removeMovimiento = (id) => upd((ev) => ({ ...ev, jornadas: ev.jornadas.map((j) => (j.id === jornada.id ? { ...j, movimientos: (j.movimientos || []).filter((m) => m.id !== id) } : j)) }));
 
+  const importarInventario = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImportInvMsg("Leyendo archivo…");
+    try {
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf, { type: "array" });
+      const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: "" });
+      const ubicByNorm = {}; evento.ubicaciones.forEach((u) => { ubicByNorm[normTxt(u)] = u; });
+      const prodByNorm = {}; evento.productos.forEach((p) => { prodByNorm[normTxt(p.nombre)] = p.id; });
+      const cambios = {};
+      let aplicadas = 0, ignoradas = 0;
+      rows.forEach((r) => {
+        const u = ubicByNorm[normTxt(campoFila(r, ["Ubicación", "Ubicacion"]))];
+        const pid = prodByNorm[normTxt(campoFila(r, ["Producto", "Nombre", "Referencia"]))];
+        if (!u || !pid) { ignoradas++; return; }
+        const iniRaw = campoFila(r, ["Inicial"]);
+        const finRaw = campoFila(r, ["Final"]);
+        const set = {};
+        if (iniRaw !== "") set.inicial = Math.max(0, Number(iniRaw) || 0);
+        if (finRaw !== "") set.final = Math.max(0, Number(finRaw) || 0);
+        if (!Object.keys(set).length) return;
+        cambios[u] = cambios[u] || {};
+        cambios[u][pid] = { ...(cambios[u][pid] || {}), ...set };
+        aplicadas++;
+      });
+      if (aplicadas === 0) {
+        setImportInvMsg("No se encontraron datos válidos. Revisa que las ubicaciones y productos coincidan con los del evento.");
+        e.target.value = ""; return;
+      }
+      upd((ev) => ({
+        ...ev,
+        jornadas: ev.jornadas.map((j) => {
+          if (j.id !== jornada.id) return j;
+          const conteo = { ...j.conteo };
+          Object.keys(cambios).forEach((u) => {
+            const cu = { ...(conteo[u] || {}) };
+            Object.keys(cambios[u]).forEach((pid) => { cu[pid] = { ...(cu[pid] || { inicial: 0, final: 0 }), ...cambios[u][pid] }; });
+            conteo[u] = cu;
+          });
+          return { ...j, conteo };
+        }),
+      }));
+      setImportInvMsg(`Importado en ${fechaLabel(jornada.fecha)}: ${aplicadas} líneas${ignoradas ? ` · ${ignoradas} ignoradas (no coinciden)` : ""}.`);
+      e.target.value = "";
+    } catch (err) {
+      console.error(err);
+      setImportInvMsg("No se pudo leer el archivo. Asegúrate de que es un .xlsx válido.");
+      e.target.value = "";
+    }
+  };
+
   const setValor = (pid, campo, valor) => {
     if (campo === "inicial" && !puedeInicial) return;
     if (campo === "final" && !puedeContar) return;
@@ -853,6 +907,18 @@ function ConteoView({ evento, role, upd, jornada, jornadaActivaId, setJornadaAct
   return (
     <div>
       <JornadaSelector evento={evento} jornadaActivaId={jornadaActivaId} setJornadaActivaId={setJornadaActivaId} />
+
+      <div style={{ ...styles.formCard, marginTop: 0 }}>
+        <div style={styles.formCardTitle}>Inventario en papel / importar</div>
+        <div style={styles.dimText}>Descarga la plantilla en blanco para contar a mano. Cuando la tengas rellena, impórtala para volcar el Inicial y el Final en la jornada seleccionada ({fechaLabel(jornada.fecha)}).</div>
+        <div style={styles.formRow}>
+          <button onClick={() => descargarPlantillaInventario(evento)} style={styles.smallBtn}>↓ Descargar plantilla</button>
+          {puedeInicial && <button onClick={() => { setImportInvMsg(null); invFileRef.current?.click(); }} style={styles.importBtn}>↑ Importar inventario</button>}
+        </div>
+        <input ref={invFileRef} type="file" accept=".xlsx,.xls" onChange={importarInventario} style={{ display: "none" }} />
+        {importInvMsg && <div style={{ color: COLORS.green, fontSize: 13 }}>{importInvMsg}</div>}
+      </div>
+
       <div style={styles.chipWrap}>
         {evento.ubicaciones.map((u) => (
           <button key={u} onClick={() => setUbicActiva(u)} style={{ ...styles.chip, ...(u === ubicActiva ? styles.chipActive : {}), ...(confirmadoUbic(u) && u !== ubicActiva ? styles.chipDone : {}) }}>{u}{confirmadoUbic(u) ? " ✓" : ""}</button>
@@ -1106,6 +1172,25 @@ function descargarJornadaExcel(evento, jornada) {
     XLSX.utils.book_append_sheet(wb, wsM, "Movimientos");
   }
   XLSX.writeFile(wb, `Eventrack_${nombreSeguro(evento.nombre)}_${jornada.fecha || "sinfecha"}.xlsx`);
+}
+
+// Plantilla de inventario en blanco (Formato A): una fila por ubicación × producto.
+// Sirve para imprimir y contar a mano, y para importar luego en una jornada.
+function descargarPlantillaInventario(evento) {
+  const filas = [];
+  evento.ubicaciones.forEach((u) => {
+    const prods = [...evento.productos].sort((a, b) =>
+      (a.categoria || "").localeCompare(b.categoria || "") || a.nombre.localeCompare(b.nombre));
+    prods.forEach((p) => {
+      filas.push({ "Ubicación": u, "Categoría": p.categoria, Producto: p.nombre, Unidad: p.unidad, Inicial: "", Final: "" });
+    });
+  });
+  if (!filas.length) { alert("Configura ubicaciones y productos antes de descargar la plantilla."); return; }
+  const ws = XLSX.utils.json_to_sheet(filas, { header: ["Ubicación", "Categoría", "Producto", "Unidad", "Inicial", "Final"] });
+  ws["!cols"] = [{ wch: 18 }, { wch: 16 }, { wch: 28 }, { wch: 10 }, { wch: 10 }, { wch: 10 }];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Inventario");
+  XLSX.writeFile(wb, `Eventrack_${nombreSeguro(evento.nombre)}_plantilla_inventario.xlsx`);
 }
 
 // Descarga el resumen total por referencia (suma de todas las jornadas y ubicaciones).
