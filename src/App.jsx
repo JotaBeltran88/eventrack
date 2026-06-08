@@ -364,7 +364,7 @@ function EventosList({ eventos, role, onOpen, onAddCompleto, onRemove, updateEve
       {esAdmin && (
         <div style={styles.formCard}>
           <div style={styles.formCardTitle}>Nuevo evento</div>
-          <input value={nombre} onChange={(e) => setNombre(e.target.value)} placeholder="Nombre del evento (ej. Noches del Botánico)" style={styles.textInput} />
+          <input value={nombre} onChange={(e) => setNombre(e.target.value)} placeholder="Nombre del evento" style={styles.textInput} />
           <div style={styles.formRow}>
             <button onClick={() => setTipo("single")} style={{ ...styles.chip, ...(tipo === "single" ? styles.chipActive : {}) }}>Un solo día</button>
             <button onClick={() => setTipo("multi")} style={{ ...styles.chip, ...(tipo === "multi" ? styles.chipActive : {}) }}>Varios días</button>
