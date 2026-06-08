@@ -766,6 +766,8 @@ function ConteoView({ evento, role, upd, jornada, jornadaActivaId, setJornadaAct
   const [movCom, setMovCom] = useState("");
   const [importInvMsg, setImportInvMsg] = useState(null);
   const invFileRef = React.useRef(null);
+  const [mostrarPapel, setMostrarPapel] = useState(false);
+  const [mostrarMov, setMostrarMov] = useState(false);
   if (evento.ubicaciones.length === 0 || evento.productos.length === 0)
     return <div style={styles.empty}>Necesitas ubicaciones y referencias (Configuración) para el conteo.</div>;
   if (evento.jornadas.length === 0)
@@ -954,14 +956,21 @@ function ConteoView({ evento, role, upd, jornada, jornadaActivaId, setJornadaAct
       <JornadaSelector evento={evento} jornadaActivaId={jornadaActivaId} setJornadaActivaId={setJornadaActivaId} />
 
       <div style={{ ...styles.formCard, marginTop: 0 }}>
-        <div style={styles.formCardTitle}>Inventario en papel / importar</div>
-        <div style={styles.dimText}>Descarga la plantilla en blanco para contar a mano. Cuando la tengas rellena, impórtala para volcar el Inicial y el Final en la jornada seleccionada ({fechaLabel(jornada.fecha)}).</div>
-        <div style={styles.formRow}>
-          <button onClick={() => descargarPlantillaInventario(evento)} style={styles.smallBtn}>↓ Descargar plantilla</button>
-          {puedeInicial && <button onClick={() => { setImportInvMsg(null); invFileRef.current?.click(); }} style={styles.importBtn}>↑ Importar inventario</button>}
+        <div onClick={() => setMostrarPapel((v) => !v)} style={{ ...styles.collapseHeader, marginBottom: mostrarPapel ? 10 : 0 }}>
+          <span style={styles.formCardTitle}>Plantilla e importación (papel)</span>
+          <span style={styles.collapseMeta}>{mostrarPapel ? "▲" : "▼"}</span>
         </div>
-        <input ref={invFileRef} type="file" accept=".xlsx,.xls" onChange={importarInventario} style={{ display: "none" }} />
-        {importInvMsg && <div style={{ color: COLORS.green, fontSize: 13 }}>{importInvMsg}</div>}
+        {mostrarPapel && (
+          <>
+            <div style={styles.dimText}>Descarga la plantilla en blanco para contar a mano. Cuando la tengas rellena, impórtala para volcar el Inicial y el Final en la jornada seleccionada ({fechaLabel(jornada.fecha)}).</div>
+            <div style={styles.formRow}>
+              <button onClick={() => descargarPlantillaInventario(evento)} style={styles.smallBtn}>↓ Descargar plantilla</button>
+              {puedeInicial && <button onClick={() => { setImportInvMsg(null); invFileRef.current?.click(); }} style={styles.importBtn}>↑ Importar inventario</button>}
+            </div>
+            <input ref={invFileRef} type="file" accept=".xlsx,.xls" onChange={importarInventario} style={{ display: "none" }} />
+            {importInvMsg && <div style={{ color: COLORS.green, fontSize: 13 }}>{importInvMsg}</div>}
+          </>
+        )}
       </div>
 
       <div style={styles.chipWrap}>
@@ -1039,7 +1048,12 @@ function ConteoView({ evento, role, upd, jornada, jornadaActivaId, setJornadaAct
       )}
 
       <div style={styles.formCard}>
-        <div style={styles.formCardTitle}>Movimientos · {ubicActiva}</div>
+        <div onClick={() => setMostrarMov((v) => !v)} style={{ ...styles.collapseHeader, marginBottom: mostrarMov ? 10 : 0 }}>
+          <span style={styles.formCardTitle}>Movimientos · {ubicActiva}</span>
+          <span style={styles.collapseMeta}>{movimientosUbic.length > 0 ? `${movimientosUbic.length} ` : ""}{mostrarMov ? "▲" : "▼"}</span>
+        </div>
+        {mostrarMov && (
+        <>
         <div style={styles.dimText}>Entradas (reposición), salidas (mermas o cesiones) y traspasos a otra ubicación. Cada uno con su comentario.</div>
         {movimientosUbic.length === 0 && <div style={{ color: COLORS.dim, fontSize: 13 }}>Sin movimientos en esta ubicación.</div>}
         {movimientosUbic.map((m) => {
@@ -1081,6 +1095,8 @@ function ConteoView({ evento, role, upd, jornada, jornadaActivaId, setJornadaAct
             <input type="text" value={movCom} placeholder="Comentario (ej. pedido de camerinos)" onChange={(e) => setMovCom(e.target.value)} style={styles.textInput} />
             <button onClick={addMovimiento} style={styles.addBtn}>+ Añadir movimiento</button>
           </div>
+        )}
+        </>
         )}
       </div>
       </>
