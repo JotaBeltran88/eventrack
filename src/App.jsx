@@ -7,6 +7,12 @@ import { loadState, saveState, saveWithMerge, subscribeState, login, setCodes } 
 function deepEqual(a, b) { return JSON.stringify(a) === JSON.stringify(b); }
 function isObj(x) { return x && typeof x === "object" && !Array.isArray(x); }
 function tieneId(x) { return isObj(x) && "id" in x; }
+// Serialización con claves ordenadas: estable frente al reordenado de jsonb de Supabase.
+function sjson(x) {
+  if (x === null || typeof x !== "object") return JSON.stringify(x);
+  if (Array.isArray(x)) return "[" + x.map(sjson).join(",") + "]";
+  return "{" + Object.keys(x).sort().map((k) => JSON.stringify(k) + ":" + sjson(x[k])).join(",") + "}";
+}
 function merge3(base, mine, theirs) {
   if (mine === undefined) {
     if (base !== undefined && deepEqual(base, theirs)) return undefined; // yo borré, ellos no tocaron
@@ -219,13 +225,13 @@ export default function App() {
     setShowPapelera(false);
   };
 
-  const lastWritten = useRef("");                 // JSON de lo último que escribimos (anti-eco)
+  const lastWritten = useRef("");                 // firma estable de lo último escrito (anti-eco)
   const baseRef = useRef({ eventos: [] });        // estado del servidor que conocemos (ancestro)
-  const baseJsonRef = useRef(JSON.stringify({ eventos: [] }));
+  const baseJsonRef = useRef(sjson({ eventos: [] }));
   const eventosRef = useRef([]);                  // valor local actual (para leer en callbacks)
   useEffect(() => { eventosRef.current = eventos; }, [eventos]);
 
-  const fijarBase = (obj, json) => { baseRef.current = obj; baseJsonRef.current = json || JSON.stringify(obj); };
+  const fijarBase = (obj, json) => { baseRef.current = obj; baseJsonRef.current = json || sjson(obj); };
 
   // Carga inicial + suscripción en tiempo real (fusiona lo entrante con lo local sin guardar).
   useEffect(() => {
@@ -233,7 +239,7 @@ export default function App() {
       try {
         const data = await loadState();
         if (data && Array.isArray(data.eventos)) {
-          const json = JSON.stringify(data);
+          const json = sjson(data);
           fijarBase(data, json);
           lastWritten.current = json;
           setEventos(data.eventos);
@@ -244,8 +250,8 @@ export default function App() {
 
     const unsub = subscribeState((data) => {
       if (!data || !Array.isArray(data.eventos)) return;
-      const json = JSON.stringify(data);
-      if (json === lastWritten.current) return; // nuestro propio cambio
+      const json = sjson(data);
+      if (json === lastWritten.current) return; // nuestro propio eco
       const merged = mergeEstado(baseRef.current, { eventos: eventosRef.current }, data);
       fijarBase(data, json);                     // su estado es el nuevo ancestro común
       setEventos(merged.eventos);                // mantiene mis cambios sin guardar + los suyos
@@ -260,7 +266,7 @@ export default function App() {
         podarEstado(mergeEstado(baseRef.current, { eventos: eventosRef.current }, server && Array.isArray(server.eventos) ? server : { eventos: [] }))
       );
       if (merged) {
-        const json = JSON.stringify(merged);
+        const json = sjson(merged);
         fijarBase(merged, json);
         lastWritten.current = json;
         setEventos(merged.eventos);
@@ -275,7 +281,7 @@ export default function App() {
   // Guardado automático (debounced) cuando lo local difiere del servidor conocido.
   useEffect(() => {
     if (!loaded) return;
-    const json = JSON.stringify({ eventos });
+    const json = sjson({ eventos });
     if (json === baseJsonRef.current) { setDirty(false); return; } // local == servidor
     setDirty(true);
     const t = setTimeout(() => { save(); }, 600);
