@@ -906,7 +906,7 @@ function ConteoView({ evento, role, upd, jornada, jornadaActivaId, setJornadaAct
         <div style={styles.empty}>Elige una familia de productos para ver sus referencias.</div>
       ) : (
         <div style={{ marginBottom: 26 }}>
-          <div style={styles.dimText}>Consumo = Inicial + Entradas − Salidas − Final. El Inicial se hereda del Final de la jornada anterior; las entradas, salidas y traspasos se registran abajo en «Movimientos».</div>
+          <div style={styles.dimText}>El Inicial es el stock disponible: arrastre del día anterior + entradas/traspasos recibidos − salidas/traspasos enviados. Consumo = Inicial − Final.</div>
           <div style={styles.tableHead}>
             <span style={{ flex: 2 }}>Producto</span>
             <span style={styles.colNum}>Inicial</span><span style={styles.colNum}>Final</span><span style={styles.colNum}>Consumo</span>
@@ -920,7 +920,7 @@ function ConteoView({ evento, role, upd, jornada, jornadaActivaId, setJornadaAct
                   <span style={{ color: COLORS.cream }}>{p.nombre}</span><span style={styles.unidad}> · {p.unidad}</span>
                   {(t.ent > 0 || t.sal > 0) && <span style={styles.movHint}>{t.ent > 0 ? ` ▲ +${t.ent}` : ""}{t.sal > 0 ? ` ▼ −${t.sal}` : ""}</span>}
                 </span>
-                <input type="number" min="0" value={c.inicial || ""} placeholder="0" disabled={!puedeEditar} onChange={(e) => setValor(p.id, "inicial", e.target.value)} style={{ ...styles.input, ...(puedeEditar ? {} : styles.inputDisabled) }} />
+                <input type="number" min="0" value={t.ini || ""} placeholder="0" disabled={!puedeEditar} onChange={(e) => { const v = e.target.value === "" ? 0 : Math.max(0, Number(e.target.value)); setValor(p.id, "inicial", Math.max(0, v - t.ent + t.sal)); }} style={{ ...styles.input, ...(puedeEditar ? {} : styles.inputDisabled) }} />
                 <input type="number" min="0" value={c.final || ""} placeholder="0" disabled={!puedeEditar} onChange={(e) => setValor(p.id, "final", e.target.value)} style={{ ...styles.input, ...(puedeEditar ? {} : styles.inputDisabled) }} />
                 <span style={{ ...styles.colNum, color: t.con > 0 ? COLORS.gold : COLORS.dim, fontWeight: 600 }}>{t.con}</span>
               </div>
@@ -991,7 +991,7 @@ function ResumenView({ evento }) {
     let ini = 0, fin = 0, ent = 0, sal = 0, con = 0;
     evento.jornadas.forEach((j) => evento.ubicaciones.forEach((u) => {
       const t = celdaTotales(j, u, pid);
-      ini += t.ini; fin += t.fin; ent += t.ent; sal += t.sal; con += t.con;
+      ini += t.base; fin += t.fin; ent += t.ent; sal += t.sal; con += t.con;
     }));
     return { ini, fin, ent, sal, con };
   };
@@ -1038,10 +1038,11 @@ function nombreSeguro(nombre) {
 }
 
 // Totales de una celda (ubicación + producto) en una jornada, con movimientos.
-// Consumo = Inicial + Entradas − Salidas − Final.
+// El stock disponible (ini) = arrastre (base) + entradas − salidas.
+// Consumo = disponible − Final.
 function celdaTotales(jornada, ubic, pid) {
   const c = (jornada.conteo && jornada.conteo[ubic] && jornada.conteo[ubic][pid]) || { inicial: 0, final: 0 };
-  const ini = c.inicial || 0, fin = c.final || 0;
+  const base = c.inicial || 0, fin = c.final || 0;
   let ent = 0, sal = 0;
   for (const m of (jornada.movimientos || [])) {
     if (m.productoId !== pid) continue;
@@ -1051,7 +1052,8 @@ function celdaTotales(jornada, ubic, pid) {
     else if (m.tipo === "salida" && m.ubic === ubic) sal += cant;
     else if (m.tipo === "traspaso" && m.ubic === ubic) sal += cant;
   }
-  return { ini, fin, ent, sal, con: Math.max(0, ini + ent - sal - fin) };
+  const ini = base + ent - sal; // stock disponible
+  return { base, ini, fin, ent, sal, con: Math.max(0, ini - fin) };
 }
 
 // Construye la hoja de inventario de UNA jornada en formato cruzado:
@@ -1119,7 +1121,7 @@ function descargarResumenExcel(evento) {
     let ini = 0, fin = 0, ent = 0, sal = 0, con = 0;
     evento.jornadas.forEach((j) => evento.ubicaciones.forEach((u) => {
       const t = celdaTotales(j, u, p.id);
-      ini += t.ini; fin += t.fin; ent += t.ent; sal += t.sal; con += t.con;
+      ini += t.base; fin += t.fin; ent += t.ent; sal += t.sal; con += t.con;
     }));
     return { Producto: p.nombre, "Categoría": p.categoria, Unidad: p.unidad, "Inicial total": ini, "Entradas": ent, "Salidas": sal, "Final total": fin, "Consumo total": con };
   });
@@ -1147,7 +1149,7 @@ function ExportButton({ evento }) {
     const detalle = [];
     evento.jornadas.forEach((j) => evento.ubicaciones.forEach((u) => evento.productos.forEach((p) => {
       const t = celdaTotales(j, u, p.id);
-      detalle.push({ Jornada: j.fecha, "Ubicación": u, "Categoría": p.categoria, Producto: p.nombre, Unidad: p.unidad, Inicial: t.ini, Entradas: t.ent, Salidas: t.sal, Final: t.fin, Consumo: t.con });
+      detalle.push({ Jornada: j.fecha, "Ubicación": u, "Categoría": p.categoria, Producto: p.nombre, Unidad: p.unidad, Inicial: t.base, Entradas: t.ent, Salidas: t.sal, Final: t.fin, Consumo: t.con });
     })));
     if (detalle.length) {
       const ws = XLSX.utils.json_to_sheet(detalle);
@@ -1160,7 +1162,7 @@ function ExportButton({ evento }) {
         let ini = 0, fin = 0, ent = 0, sal = 0, con = 0;
         evento.jornadas.forEach((j) => evento.ubicaciones.forEach((u) => {
           const t = celdaTotales(j, u, p.id);
-          ini += t.ini; fin += t.fin; ent += t.ent; sal += t.sal; con += t.con;
+          ini += t.base; fin += t.fin; ent += t.ent; sal += t.sal; con += t.con;
         }));
         return { Producto: p.nombre, "Categoría": p.categoria, Unidad: p.unidad, "Inicial total": ini, "Entradas": ent, "Salidas": sal, "Final total": fin, "Consumo total": con };
       });
