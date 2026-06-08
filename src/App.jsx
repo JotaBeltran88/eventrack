@@ -827,27 +827,41 @@ function ConteoView({ evento, role, upd, jornada, jornadaActivaId, setJornadaAct
     try {
       const buf = await file.arrayBuffer();
       const wb = XLSX.read(buf, { type: "array" });
-      const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: "" });
       const ubicByNorm = {}; evento.ubicaciones.forEach((u) => { ubicByNorm[normTxt(u)] = u; });
       const prodByNorm = {}; evento.productos.forEach((p) => { prodByNorm[normTxt(p.nombre)] = p.id; });
       const cambios = {};
-      let aplicadas = 0, ignoradas = 0;
-      rows.forEach((r) => {
-        const u = ubicByNorm[normTxt(campoFila(r, ["Ubicación", "Ubicacion"]))];
-        const pid = prodByNorm[normTxt(campoFila(r, ["Producto", "Nombre", "Referencia"]))];
-        if (!u || !pid) { ignoradas++; return; }
-        const iniRaw = campoFila(r, ["Inicial"]);
-        const finRaw = campoFila(r, ["Final"]);
-        const set = {};
-        if (iniRaw !== "") set.inicial = Math.max(0, Number(iniRaw) || 0);
-        if (finRaw !== "") set.final = Math.max(0, Number(finRaw) || 0);
-        if (!Object.keys(set).length) return;
-        cambios[u] = cambios[u] || {};
-        cambios[u][pid] = { ...(cambios[u][pid] || {}), ...set };
-        aplicadas++;
+      let aplicadas = 0;
+      wb.SheetNames.forEach((sheetName) => {
+        const rows = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { header: 1, defval: "" });
+        // La ubicación de esta hoja: por nombre de hoja, o por la fila "Ubicación: X".
+        let ubic = ubicByNorm[normTxt(sheetName)];
+        if (!ubic) {
+          for (const r of rows) {
+            const c0 = String(r[0] || "");
+            if (normTxt(c0).startsWith("ubicacion")) {
+              const val = (c0.includes(":") ? c0.split(":").slice(1).join(":") : String(r[1] || "")).trim();
+              if (ubicByNorm[normTxt(val)]) { ubic = ubicByNorm[normTxt(val)]; break; }
+            }
+          }
+        }
+        if (!ubic) return;
+        rows.forEach((r) => {
+          const nombre = String(r[0] || "").trim();
+          if (!nombre) return;
+          const pid = prodByNorm[normTxt(nombre)];
+          if (!pid) return; // familias, cabeceras y "Ubicación:" se ignoran solas
+          const iniRaw = r[2], finRaw = r[3];
+          const set = {};
+          if (iniRaw !== "" && iniRaw != null) set.inicial = Math.max(0, Number(iniRaw) || 0);
+          if (finRaw !== "" && finRaw != null) set.final = Math.max(0, Number(finRaw) || 0);
+          if (!Object.keys(set).length) return;
+          cambios[ubic] = cambios[ubic] || {};
+          cambios[ubic][pid] = { ...(cambios[ubic][pid] || {}), ...set };
+          aplicadas++;
+        });
       });
       if (aplicadas === 0) {
-        setImportInvMsg("No se encontraron datos válidos. Revisa que las ubicaciones y productos coincidan con los del evento.");
+        setImportInvMsg("No se encontraron datos válidos. Usa la plantilla descargada de este mismo evento.");
         e.target.value = ""; return;
       }
       upd((ev) => ({
@@ -863,7 +877,7 @@ function ConteoView({ evento, role, upd, jornada, jornadaActivaId, setJornadaAct
           return { ...j, conteo };
         }),
       }));
-      setImportInvMsg(`Importado en ${fechaLabel(jornada.fecha)}: ${aplicadas} líneas${ignoradas ? ` · ${ignoradas} ignoradas (no coinciden)` : ""}.`);
+      setImportInvMsg(`Importado en ${fechaLabel(jornada.fecha)}: ${aplicadas} líneas.`);
       e.target.value = "";
     } catch (err) {
       console.error(err);
@@ -1174,22 +1188,39 @@ function descargarJornadaExcel(evento, jornada) {
   XLSX.writeFile(wb, `Eventrack_${nombreSeguro(evento.nombre)}_${jornada.fecha || "sinfecha"}.xlsx`);
 }
 
-// Plantilla de inventario en blanco (Formato A): una fila por ubicación × producto.
-// Sirve para imprimir y contar a mano, y para importar luego en una jornada.
+// Plantilla de inventario para papel: una HOJA por ubicación, con la barra
+// como cabecera y los productos agrupados por familia (familia como título).
 function descargarPlantillaInventario(evento) {
-  const filas = [];
-  evento.ubicaciones.forEach((u) => {
-    const prods = [...evento.productos].sort((a, b) =>
-      (a.categoria || "").localeCompare(b.categoria || "") || a.nombre.localeCompare(b.nombre));
-    prods.forEach((p) => {
-      filas.push({ "Ubicación": u, "Categoría": p.categoria, Producto: p.nombre, Unidad: p.unidad, Inicial: "", Final: "" });
-    });
-  });
-  if (!filas.length) { alert("Configura ubicaciones y productos antes de descargar la plantilla."); return; }
-  const ws = XLSX.utils.json_to_sheet(filas, { header: ["Ubicación", "Categoría", "Producto", "Unidad", "Inicial", "Final"] });
-  ws["!cols"] = [{ wch: 18 }, { wch: 16 }, { wch: 28 }, { wch: 10 }, { wch: 10 }, { wch: 10 }];
+  if (!evento.ubicaciones.length || !evento.productos.length) {
+    alert("Configura ubicaciones y productos antes de descargar la plantilla.");
+    return;
+  }
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, "Inventario");
+  const cats = [...new Set(evento.productos.map((p) => p.categoria))].sort((a, b) => String(a).localeCompare(String(b)));
+  const usados = {};
+  evento.ubicaciones.forEach((u) => {
+    const aoa = []; const merges = [];
+    aoa.push([`Ubicación: ${u}`]); merges.push({ s: { r: 0, c: 0 }, e: { r: 0, c: 3 } });
+    aoa.push([]);
+    cats.forEach((cat) => {
+      const prods = evento.productos.filter((p) => p.categoria === cat).sort((a, b) => a.nombre.localeCompare(b.nombre));
+      if (!prods.length) return;
+      merges.push({ s: { r: aoa.length, c: 0 }, e: { r: aoa.length, c: 3 } });
+      aoa.push([cat]);
+      aoa.push(["Producto", "Unidad", "Inicial", "Final"]);
+      prods.forEach((p) => aoa.push([p.nombre, p.unidad, "", ""]));
+      aoa.push([]);
+    });
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    ws["!cols"] = [{ wch: 40 }, { wch: 12 }, { wch: 10 }, { wch: 10 }];
+    ws["!merges"] = merges;
+    // Nombre de hoja válido (sin caracteres prohibidos, máx 31, único)
+    let name = String(u).replace(/[:\\/?*\[\]]/g, " ").trim().slice(0, 28) || "Barra";
+    const base = name; let n = 2;
+    while (usados[name.toLowerCase()]) { name = (base.slice(0, 25) + " " + n); n++; }
+    usados[name.toLowerCase()] = true;
+    XLSX.utils.book_append_sheet(wb, ws, name);
+  });
   XLSX.writeFile(wb, `Eventrack_${nombreSeguro(evento.nombre)}_plantilla_inventario.xlsx`);
 }
 
