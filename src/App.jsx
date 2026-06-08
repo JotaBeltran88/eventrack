@@ -722,9 +722,11 @@ function JornadaSelector({ evento, jornadaActivaId, setJornadaActivaId }) {
         <label style={{ ...styles.fieldLabel, display: "block", marginBottom: 6 }}>Jornada</label>
         <select value={jornadaActivaId || ""} onChange={(e) => setJornadaActivaId(e.target.value)} style={styles.select}>
           {evento.jornadas.map((j) => {
+            const total = evento.ubicaciones.length;
             const conf = evento.ubicaciones.filter((u) => j.confirmado && j.confirmado[u]).length;
+            const completo = total > 0 && conf === total;
             return (
-              <option key={j.id} value={j.id}>{fechaLabel(j.fecha)} · {conf}/{evento.ubicaciones.length} ✓{j.editable === false ? " · 🔒" : ""}</option>
+              <option key={j.id} value={j.id}>{fechaLabel(j.fecha)} · {conf}/{total}{completo ? " ✓" : ""}{j.editable === false ? " · 🔒" : ""}</option>
             );
           })}
         </select>
