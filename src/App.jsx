@@ -91,8 +91,15 @@ function podarEstado(estado) {
 const COLORS = {
   bg: "#f7f8fa", panel: "#ffffff", panel2: "#f1f2f6", line: "#e6e8ee",
   gold: "#4f46e5", goldDim: "#8b90a8", cream: "#1f2430", dim: "#6b7280",
-  green: "#1a9d5f", red: "#dc2626",
+  green: "#1a9d5f", red: "#dc2626", amber: "#d97706", amberBg: "#fff7ed", amberLine: "#fed7aa",
 };
+
+// Estado de completitud de una jornada: cuántas ubicaciones están confirmadas.
+function jornadaEstado(evento, j) {
+  const total = evento.ubicaciones.length;
+  const conf = evento.ubicaciones.filter((u) => j.confirmado && j.confirmado[u]).length;
+  return { total, conf, completo: total > 0 && conf === total, empezado: conf > 0 };
+}
 
 function nuevoEvento(nombre, fecha) {
   return {
@@ -803,11 +810,9 @@ function JornadaSelector({ evento, jornadaActivaId, setJornadaActivaId }) {
         <label style={{ ...styles.fieldLabel, display: "block", marginBottom: 6 }}>Jornada</label>
         <select value={jornadaActivaId || ""} onChange={(e) => setJornadaActivaId(e.target.value)} style={styles.select}>
           {evento.jornadas.map((j) => {
-            const total = evento.ubicaciones.length;
-            const conf = evento.ubicaciones.filter((u) => j.confirmado && j.confirmado[u]).length;
-            const completo = total > 0 && conf === total;
+            const { total, conf, completo } = jornadaEstado(evento, j);
             return (
-              <option key={j.id} value={j.id}>{fechaLabel(j.fecha)} · {conf}/{total}{completo ? " ✓" : ""}{j.editable === false ? " · 🔒" : ""}</option>
+              <option key={j.id} value={j.id}>{fechaLabel(j.fecha)} · {conf}/{total}{completo ? " ✓" : " ⚠ sin terminar"}{j.editable === false ? " · 🔒" : ""}</option>
             );
           })}
         </select>
@@ -1022,6 +1027,32 @@ function ConteoView({ evento, role, upd, jornada, jornadaActivaId, setJornadaAct
   return (
     <div>
       <JornadaSelector evento={evento} jornadaActivaId={jornadaActivaId} setJornadaActivaId={setJornadaActivaId} />
+
+      {(() => {
+        const incompletas = evento.jornadas.filter((j) => { const e = jornadaEstado(evento, j); return !e.completo; });
+        if (incompletas.length === 0) return null;
+        return (
+          <div style={styles.alertBox}>
+            <div style={{ fontWeight: 700, color: COLORS.amber, marginBottom: 8 }}>
+              ⚠ {incompletas.length === 1 ? "1 día sin terminar" : `${incompletas.length} días sin terminar`}
+            </div>
+            <div style={{ fontSize: 12.5, color: COLORS.dim, marginBottom: 9 }}>
+              Toca un día para ir a revisarlo. Faltan ubicaciones por confirmar (las que no tienen ✓).
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
+              {incompletas.map((j) => {
+                const { conf, total } = jornadaEstado(evento, j);
+                const activa = j.id === jornadaActivaId;
+                return (
+                  <button key={j.id} onClick={() => setJornadaActivaId(j.id)} style={{ ...styles.alertChip, ...(activa ? styles.alertChipActive : {}) }}>
+                    {fechaLabel(j.fecha)} · {conf}/{total}{j.editable === false ? " 🔒" : ""}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
 
       <div style={{ marginBottom: 16 }}>
         <button onClick={() => setMostrarPapel((v) => !v)} style={styles.linkBtn}>{mostrarPapel ? "▲" : "▼"} Plantilla / importar</button>
@@ -1571,6 +1602,9 @@ const styles = {
   chip: { background: COLORS.panel, border: `1px solid ${COLORS.line}`, color: COLORS.dim, padding: "7px 15px", borderRadius: 20, fontSize: 13, fontWeight: 500 },
   chipActive: { background: COLORS.gold, color: COLORS.bg, borderColor: COLORS.gold },
   chipDone: { borderColor: COLORS.green, color: COLORS.green },
+  alertBox: { background: COLORS.amberBg, border: `1px solid ${COLORS.amberLine}`, borderRadius: 10, padding: "12px 14px", marginBottom: 18 },
+  alertChip: { background: COLORS.panel, border: `1px solid ${COLORS.amberLine}`, color: COLORS.amber, padding: "7px 13px", borderRadius: 20, fontSize: 13, fontWeight: 600 },
+  alertChipActive: { background: COLORS.amber, color: "#ffffff", borderColor: COLORS.amber },
   confirmBar: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap", background: COLORS.panel, border: `1px solid ${COLORS.line}`, borderRadius: 10, padding: "10px 14px", marginBottom: 18 },
   chipEdit: { background: COLORS.panel, border: `1px solid ${COLORS.line}`, color: COLORS.cream, padding: "6px 8px 6px 14px", borderRadius: 20, fontSize: 13, display: "inline-flex", alignItems: "center", gap: 4 },
   jornadaRow: { display: "flex", alignItems: "center", gap: 10, background: COLORS.panel, border: `1px solid ${COLORS.line}`, borderRadius: 10, padding: "12px 14px", cursor: "pointer" },
