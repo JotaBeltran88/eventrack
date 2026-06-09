@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<style>
+  @page { size: A4; margin: 14mm 14mm 12mm 14mm; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: #1f2430;
+    font-size: 10.5px;
+    line-height: 1.45;
+    background: #ffffff;
+  }
+  .accent { color: #4f46e5; }
+  .muted { color: #6b7280; }
+
+  /* Cabecera */
+  header {
+    display: flex; align-items: center; gap: 12px;
+    border-bottom: 3px solid #4f46e5;
+    padding-bottom: 10px; margin-bottom: 14px;
+  }
+  header img { width: 46px; height: 46px; border-radius: 10px; }
+  header .titles { flex: 1; }
+  header h1 { margin: 0; font-size: 22px; letter-spacing: -0.5px; }
+  header .sub { margin: 2px 0 0; font-size: 11px; color: #6b7280; }
+  header .badge {
+    font-size: 9px; color: #4f46e5; border: 1px solid #c7c9f5;
+    background: #f1f2ff; border-radius: 20px; padding: 4px 10px; font-weight: 600;
+    white-space: nowrap;
+  }
+
+  h2 {
+    font-size: 12.5px; margin: 16px 0 7px; color: #1f2430;
+    display: flex; align-items: center; gap: 7px;
+  }
+  h2 .n {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 19px; height: 19px; border-radius: 50%;
+    background: #4f46e5; color: #fff; font-size: 11px; font-weight: 700;
+  }
+
+  .lead {
+    background: #f1f2f6; border-left: 3px solid #4f46e5;
+    padding: 9px 12px; border-radius: 6px; margin-bottom: 4px;
+  }
+
+  /* Roles */
+  .roles { display: flex; gap: 8px; margin-top: 4px; }
+  .role {
+    flex: 1; border: 1px solid #e6e8ee; border-radius: 8px;
+    padding: 9px 10px; background: #fafbfc;
+  }
+  .role .name { font-weight: 700; font-size: 11px; }
+  .role .name .dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:5px; vertical-align: middle; }
+  .role .desc { color: #4b5563; margin-top: 3px; font-size: 9.8px; }
+
+  /* Pasos */
+  ol.steps { margin: 4px 0 0; padding-left: 0; counter-reset: step; list-style: none; }
+  ol.steps li {
+    position: relative; padding: 6px 0 6px 30px; border-bottom: 1px dashed #e6e8ee;
+  }
+  ol.steps li:last-child { border-bottom: none; }
+  ol.steps li::before {
+    counter-increment: step; content: counter(step);
+    position: absolute; left: 0; top: 5px;
+    width: 21px; height: 21px; border-radius: 50%;
+    background: #eef0ff; color: #4f46e5; border: 1px solid #c7c9f5;
+    font-weight: 700; font-size: 11px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  ol.steps li b { color: #1f2430; }
+
+  .grid2 { display: flex; gap: 14px; }
+  .grid2 > div { flex: 1; }
+
+  /* Movimientos */
+  .mov { border: 1px solid #e6e8ee; border-radius: 8px; padding: 8px 10px; margin-bottom: 6px; }
+  .mov .t { font-weight: 700; font-size: 10.5px; }
+  .mov .t .tag { font-size: 8.5px; padding: 2px 7px; border-radius: 5px; color:#fff; margin-left: 6px; vertical-align: middle; }
+  .mov .d { color: #4b5563; margin-top: 2px; font-size: 9.6px; }
+
+  .tips { background: #f0fdf6; border: 1px solid #bbe7cd; border-radius: 8px; padding: 9px 12px 9px 12px; }
+  .tips ul { margin: 4px 0 0; padding-left: 16px; }
+  .tips li { margin-bottom: 3px; }
+
+  footer {
+    margin-top: 16px; padding-top: 8px; border-top: 1px solid #e6e8ee;
+    font-size: 9px; color: #9aa0ad; display: flex; justify-content: space-between;
+  }
+  .kbd {
+    font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 9.5px;
+    background: #1f2430; color: #fff; border-radius: 5px; padding: 1px 6px;
+  }
+  .pill { background:#eef0ff; color:#4f46e5; border-radius:5px; padding:1px 6px; font-weight:600; font-size:9.5px; }
+</style>
+</head>
+<body>
+
+  <header>
+    <img src="../public/icon.png" alt="Eventrack" />
+    <div class="titles">
+      <h1>Eventrack <span class="accent">·</span> Guía del personal</h1>
+      <p class="sub">Cómo hacer el inventario de bebidas en el evento, paso a paso.</p>
+    </div>
+    <span class="badge">Inventarios de barras</span>
+  </header>
+
+  <div class="lead">
+    <b>¿Qué es Eventrack?</b> Una app para contar el stock de bebidas de cada barra durante el evento.
+    Se entra desde el móvil con un <b>código</b>, eliges el <b>evento</b> y el <b>día</b>, y vas anotando lo que hay
+    al <b>empezar</b> y al <b>terminar</b>. La app calcula sola el <b>consumo</b>. Todo se guarda en la nube: varias
+    personas pueden trabajar a la vez en barras distintas.
+  </div>
+
+  <h2><span class="n">1</span> Entrar en la app</h2>
+  <div class="grid2">
+    <div>
+      <p style="margin:2px 0 6px">Abre el enlace en el móvil e introduce <b>tu código</b>. Cada persona tiene un rol según lo que puede hacer:</p>
+      <div class="roles">
+        <div class="role">
+          <div class="name"><span class="dot" style="background:#4f46e5"></span>Admin</div>
+          <div class="desc">Lo controla todo: crear eventos, días, ubicaciones, productos y cambiar códigos.</div>
+        </div>
+        <div class="role">
+          <div class="name"><span class="dot" style="background:#1a9d5f"></span>Inventario</div>
+          <div class="desc">Pone el stock <b>Inicial</b> y registra <b>movimientos</b> (reposiciones, traspasos). También cuenta.</div>
+        </div>
+        <div class="role">
+          <div class="name"><span class="dot" style="background:#dc2626"></span>Contador</div>
+          <div class="desc">Solo anota el <b>Final</b> de cada producto. No toca el inicial ni los movimientos.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h2><span class="n">2</span> Hacer el inventario de una barra</h2>
+  <ol class="steps">
+    <li>Entra en <b>Conteo</b> y elige el <b>día</b> (la fecha) en el que estás trabajando.</li>
+    <li>Selecciona la <b>ubicación / barra</b> que vas a contar (Barra 1, Almacén…).</li>
+    <li>Escribe quién lo hace en <b>«Realizado por»</b>. <span class="muted">Es obligatorio para poder avanzar.</span></li>
+    <li>Elige la <b>familia</b> (Cervezas, Refrescos…) y verás la lista de productos.</li>
+    <li>Anota el <b>Inicial</b> (lo que hay al empezar) y, al cerrar, el <b>Final</b> (lo que queda).
+        <span class="muted">El <b>Consumo</b> lo calcula la app sola.</span></li>
+    <li>Cuando termines la barra, pulsa <b>confirmar</b> abajo. Solo entonces queda marcada como hecha. <span class="muted">(✓ al lado del día)</span></li>
+  </ol>
+
+  <h2><span class="n">3</span> Movimientos de stock <span class="muted" style="font-weight:400; font-size:10px">(rol Admin e Inventario)</span></h2>
+  <p style="margin:2px 0 7px">Si durante el evento se mueve mercancía, anótalo en la tarjeta <b>Movimientos</b> para que el consumo salga bien:</p>
+  <div class="grid2">
+    <div>
+      <div class="mov">
+        <div class="t">Entrada <span class="tag" style="background:#1a9d5f">reposición</span></div>
+        <div class="d">Llega más mercancía a la barra. Suma al disponible.</div>
+      </div>
+      <div class="mov">
+        <div class="t">Salida <span class="tag" style="background:#dc2626">merma / cesión</span></div>
+        <div class="d">Algo se rompe, se regala o se retira. Resta del disponible.</div>
+      </div>
+    </div>
+    <div>
+      <div class="mov">
+        <div class="t">Traspaso <span class="tag" style="background:#4f46e5">entre barras</span></div>
+        <div class="d">Mover producto de una ubicación a otra (ej. Almacén → Barra 2).</div>
+      </div>
+      <div class="tips" style="margin-top:0">
+        <b class="accent">Recuerda</b>
+        <ul>
+          <li>El <b>Inicial</b> es el stock con el que arrancas; no lo cambies al cerrar.</li>
+          <li>El consumo = Inicial + entradas − salidas − Final.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <h2><span class="n">4</span> Guardar y consejos</h2>
+  <div class="tips">
+    <ul>
+      <li>La app <b>guarda sola</b> a los pocos segundos. Si ves <span class="pill">● Guardar cambios</span> arriba, púlsalo para guardar al momento.</li>
+      <li>No cierres la pestaña si aparece aviso de <b>cambios sin guardar</b>: espera a que ponga <b>«Guardado ✓»</b>.</li>
+      <li>Varias personas pueden contar <b>barras distintas a la vez</b> sin pisarse. Evitad contar la <b>misma</b> barra dos a la vez.</li>
+      <li>Con buena cobertura todo se sincroniza solo entre móviles. Si vas justo de datos, guarda manualmente al terminar cada barra.</li>
+      <li>Puedes <b>descargar el inventario del día en Excel</b> desde el botón al final de la pantalla de Conteo.</li>
+    </ul>
+  </div>
+
+  <footer>
+    <span>Eventrack — Guía rápida para el personal</span>
+    <span>Ante cualquier duda, avisa al responsable (Admin).</span>
+  </footer>
+
+</body>
+</html>

@@ -349,7 +349,7 @@ export default function App() {
             : dirty
               ? <button onClick={guardarAhora} style={styles.saveDirtyBtn}>● Guardar cambios</button>
               : <span style={styles.saveTag}>Guardado ✓</span>}
-          <span style={styles.roleTag}>{role === "admin" ? "Admin" : role === "inventario" ? "Inventario" : "Contador"}</span>
+          <span style={styles.roleTag}>{role === "admin" ? "Admin" : role === "inventario" ? "Gestor" : "Contador"}</span>
           {role === "admin" && (
             <button onClick={() => { setEventoActivoId(null); setShowPapelera(false); setShowAcceso(true); }} style={styles.linkBtn}>⚙ Acceso</button>
           )}
@@ -1515,14 +1515,14 @@ function AccessView({ onClose }) {
     <div>
       <button onClick={onClose} style={styles.volverBtn}>‹ Volver</button>
       <div style={{ ...styles.sectionTitle, marginTop: 14 }}>Gestión de acceso</div>
-      <div style={styles.dimText}>Cambia los códigos de Admin, Inventario y Contador. Necesitas el código de admin actual para confirmar el cambio.</div>
+      <div style={styles.dimText}>Cambia los códigos de Admin, Gestor y Contador. Necesitas el código de admin actual para confirmar el cambio.</div>
       <div style={styles.formCard}>
         <label style={styles.fieldLabel}>Código de admin actual</label>
         <input type="password" value={actual} onChange={(e) => setActual(e.target.value)} placeholder="Código actual" style={styles.textInput} />
         <label style={styles.fieldLabel}>Nuevo código de Admin</label>
         <input type="text" value={nuevoAdmin} onChange={(e) => setNuevoAdmin(e.target.value)} placeholder="Nuevo código de admin" style={styles.textInput} />
-        <label style={styles.fieldLabel}>Nuevo código de Inventario (puede editar el inicial)</label>
-        <input type="text" value={nuevoInventario} onChange={(e) => setNuevoInventario(e.target.value)} placeholder="Nuevo código de inventario" style={styles.textInput} />
+        <label style={styles.fieldLabel}>Nuevo código de Gestor (puede editar el inicial)</label>
+        <input type="text" value={nuevoInventario} onChange={(e) => setNuevoInventario(e.target.value)} placeholder="Nuevo código de gestor" style={styles.textInput} />
         <label style={styles.fieldLabel}>Nuevo código de Contador (solo cuenta el final)</label>
         <input type="text" value={nuevoContador} onChange={(e) => setNuevoContador(e.target.value)} placeholder="Nuevo código de contador" style={styles.textInput} />
         <button onClick={guardar} disabled={busy} style={styles.addBtn}>{busy ? "Guardando…" : "Guardar códigos"}</button>
