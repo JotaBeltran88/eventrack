@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import * as XLSX from "xlsx";
+import * as XLSXStyle from "xlsx-js-style"; // solo para la plantilla con bordes
 import { loadState, saveState, saveWithMerge, subscribeState, login, setCodes } from "./storage";
 
 // ── Fusión a 3 bandas (base, local, servidor) para guardado concurrente ──
@@ -1437,33 +1438,52 @@ function descargarPlantillaInventario(evento) {
     alert("Configura ubicaciones y productos antes de descargar la plantilla.");
     return;
   }
-  const wb = XLSX.utils.book_new();
+  const wb = XLSXStyle.utils.book_new();
   const cats = [...new Set(evento.productos.map((p) => p.categoria))].sort((a, b) => String(a).localeCompare(String(b)));
   const usados = {};
+  // Estilos reutilizables
+  const thin = { style: "thin", color: { rgb: "000000" } };
+  const border = { top: thin, bottom: thin, left: thin, right: thin };
   evento.ubicaciones.forEach((u) => {
-    const aoa = []; const merges = [];
-    aoa.push([`Ubicación: ${u}`]); merges.push({ s: { r: 0, c: 0 }, e: { r: 0, c: 3 } });
-    aoa.push([]);
+    const aoa = []; const merges = []; const meta = []; // meta: tipo de fila para estilar
+    aoa.push([`Ubicación: ${u}`]); meta.push("title"); merges.push({ s: { r: 0, c: 0 }, e: { r: 0, c: 3 } });
+    aoa.push([]); meta.push(null);
     cats.forEach((cat) => {
       const prods = evento.productos.filter((p) => p.categoria === cat).sort((a, b) => a.nombre.localeCompare(b.nombre));
       if (!prods.length) return;
       merges.push({ s: { r: aoa.length, c: 0 }, e: { r: aoa.length, c: 3 } });
-      aoa.push([cat]);
-      aoa.push(["Producto", "Unidad", "Inicial", "Final"]);
-      prods.forEach((p) => aoa.push([p.nombre, p.unidad, "", ""]));
-      aoa.push([]);
+      aoa.push([cat]); meta.push("cat");
+      aoa.push(["Producto", "Unidad", "Inicial", "Final"]); meta.push("head");
+      prods.forEach((p) => { aoa.push([p.nombre, p.unidad, "", ""]); meta.push("prod"); });
+      aoa.push([]); meta.push(null);
     });
-    const ws = XLSX.utils.aoa_to_sheet(aoa);
-    ws["!cols"] = [{ wch: 40 }, { wch: 12 }, { wch: 10 }, { wch: 10 }];
+    const ws = XLSXStyle.utils.aoa_to_sheet(aoa);
+    ws["!cols"] = [{ wch: 42 }, { wch: 14 }, { wch: 12 }, { wch: 12 }];
     ws["!merges"] = merges;
+    // Aplica bordes y resaltados según el tipo de cada fila
+    const rows = [];
+    meta.forEach((t, r) => {
+      if (!t) { rows.push({ hpt: 6 }); return; } // separador fino entre familias
+      rows.push({ hpt: t === "prod" ? 22 : 18 });
+      for (let c = 0; c <= 3; c++) {
+        const ref = XLSXStyle.utils.encode_cell({ r, c });
+        if (!ws[ref]) ws[ref] = { t: "s", v: "" };
+        const al = { vertical: "center" };
+        if (t === "title") ws[ref].s = { border, font: { bold: true, sz: 13 }, alignment: al };
+        else if (t === "cat") ws[ref].s = { border, font: { bold: true, sz: 11 }, fill: { fgColor: { rgb: "F1F2F6" } }, alignment: al };
+        else if (t === "head") ws[ref].s = { border, font: { bold: true }, fill: { fgColor: { rgb: "EEF0FF" } }, alignment: { ...al, horizontal: c >= 2 ? "center" : "left" } };
+        else ws[ref].s = { border, alignment: { ...al, horizontal: c >= 2 ? "center" : "left" } };
+      }
+    });
+    ws["!rows"] = rows;
     // Nombre de hoja válido (sin caracteres prohibidos, máx 31, único)
     let name = String(u).replace(/[:\\/?*\[\]]/g, " ").trim().slice(0, 28) || "Barra";
     const base = name; let n = 2;
     while (usados[name.toLowerCase()]) { name = (base.slice(0, 25) + " " + n); n++; }
     usados[name.toLowerCase()] = true;
-    XLSX.utils.book_append_sheet(wb, ws, name);
+    XLSXStyle.utils.book_append_sheet(wb, ws, name);
   });
-  XLSX.writeFile(wb, `Eventrack_${nombreSeguro(evento.nombre)}_plantilla_inventario.xlsx`);
+  XLSXStyle.writeFile(wb, `Eventrack_${nombreSeguro(evento.nombre)}_plantilla_inventario.xlsx`);
 }
 
 // Descarga el resumen total por referencia (suma de todas las jornadas y ubicaciones).
