@@ -119,6 +119,60 @@ function celdaSospechosa(jornada, ubic, pid) {
   return t.fin > t.ini;
 }
 
+// Banners de aviso (días sin terminar + valores a revisar). onIr(jornadaId)
+// se llama al tocar un día. Reutilizado en Conteo y Resumen.
+function AvisosJornadas({ evento, jornadaActivaId, onIr }) {
+  const incompletas = evento.jornadas.filter((j) => !jornadaEstado(evento, j).completo);
+  const conIssues = evento.jornadas.map((j) => ({ j, n: jornadaRevisar(evento, j).length })).filter((x) => x.n > 0);
+  if (incompletas.length === 0 && conIssues.length === 0) return null;
+  const totalIssues = conIssues.reduce((s, x) => s + x.n, 0);
+  return (
+    <>
+      {incompletas.length > 0 && (
+        <div style={styles.alertBox}>
+          <div style={{ fontWeight: 700, color: COLORS.amber, marginBottom: 8 }}>
+            ⚠ {incompletas.length === 1 ? "1 día sin terminar" : `${incompletas.length} días sin terminar`}
+          </div>
+          <div style={{ fontSize: 12.5, color: COLORS.dim, marginBottom: 9 }}>
+            Toca un día para ir a revisarlo. Faltan ubicaciones por confirmar (las que no tienen ✓).
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
+            {incompletas.map((j) => {
+              const { conf, total } = jornadaEstado(evento, j);
+              const activa = j.id === jornadaActivaId;
+              return (
+                <button key={j.id} onClick={() => onIr(j.id)} style={{ ...styles.alertChip, ...(activa ? styles.alertChipActive : {}) }}>
+                  {fechaLabel(j.fecha)} · {conf}/{total}{j.editable === false ? " 🔒" : ""}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+      {conIssues.length > 0 && (
+        <div style={styles.errorBox}>
+          <div style={{ fontWeight: 700, color: COLORS.red, marginBottom: 8 }}>
+            ⛔ {totalIssues === 1 ? "1 valor a revisar" : `${totalIssues} valores a revisar`}
+          </div>
+          <div style={{ fontSize: 12.5, color: COLORS.dim, marginBottom: 9 }}>
+            Hay un Final mayor que el stock disponible (imposible) — probablemente un número mal escrito. Toca el día para ir a corregirlo; la celda aparece marcada en rojo.
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
+            {conIssues.map(({ j, n }) => {
+              const activa = j.id === jornadaActivaId;
+              return (
+                <button key={j.id} onClick={() => onIr(j.id)} style={{ ...styles.errorChip, ...(activa ? styles.errorChipActive : {}) }}>
+                  {fechaLabel(j.fecha)} · {n}{j.editable === false ? " 🔒" : ""}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 function nuevoEvento(nombre, fecha) {
   return {
     id: "ev" + Date.now().toString(36),
@@ -608,7 +662,7 @@ function EventoDetalle({ evento, role, updateEvento, onGuardar }) {
       {tab === "conteo" && (
         <ConteoView evento={evento} role={role} upd={upd} jornada={jornadaActiva} jornadaActivaId={jornadaActivaId} setJornadaActivaId={setJornadaActivaId} ubicActiva={ubicActiva} setUbicActiva={setUbicActiva} onGuardar={onGuardar} />
       )}
-      {tab === "resumen" && <ResumenView evento={evento} />}
+      {tab === "resumen" && <ResumenView evento={evento} setTab={setTab} setJornadaActivaId={setJornadaActivaId} />}
     </div>
   );
 }
@@ -1046,59 +1100,7 @@ function ConteoView({ evento, role, upd, jornada, jornadaActivaId, setJornadaAct
     <div>
       <JornadaSelector evento={evento} jornadaActivaId={jornadaActivaId} setJornadaActivaId={setJornadaActivaId} />
 
-      {(() => {
-        const incompletas = evento.jornadas.filter((j) => { const e = jornadaEstado(evento, j); return !e.completo; });
-        if (incompletas.length === 0) return null;
-        return (
-          <div style={styles.alertBox}>
-            <div style={{ fontWeight: 700, color: COLORS.amber, marginBottom: 8 }}>
-              ⚠ {incompletas.length === 1 ? "1 día sin terminar" : `${incompletas.length} días sin terminar`}
-            </div>
-            <div style={{ fontSize: 12.5, color: COLORS.dim, marginBottom: 9 }}>
-              Toca un día para ir a revisarlo. Faltan ubicaciones por confirmar (las que no tienen ✓).
-            </div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
-              {incompletas.map((j) => {
-                const { conf, total } = jornadaEstado(evento, j);
-                const activa = j.id === jornadaActivaId;
-                return (
-                  <button key={j.id} onClick={() => setJornadaActivaId(j.id)} style={{ ...styles.alertChip, ...(activa ? styles.alertChipActive : {}) }}>
-                    {fechaLabel(j.fecha)} · {conf}/{total}{j.editable === false ? " 🔒" : ""}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        );
-      })()}
-
-      {(() => {
-        const conIssues = evento.jornadas
-          .map((j) => ({ j, n: jornadaRevisar(evento, j).length }))
-          .filter((x) => x.n > 0);
-        if (conIssues.length === 0) return null;
-        const totalIssues = conIssues.reduce((s, x) => s + x.n, 0);
-        return (
-          <div style={styles.errorBox}>
-            <div style={{ fontWeight: 700, color: COLORS.red, marginBottom: 8 }}>
-              ⛔ {totalIssues === 1 ? "1 valor a revisar" : `${totalIssues} valores a revisar`}
-            </div>
-            <div style={{ fontSize: 12.5, color: COLORS.dim, marginBottom: 9 }}>
-              Hay un Final mayor que el stock disponible (imposible) — probablemente un número mal escrito. Toca el día para ir a corregirlo; la celda aparece marcada en rojo.
-            </div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
-              {conIssues.map(({ j, n }) => {
-                const activa = j.id === jornadaActivaId;
-                return (
-                  <button key={j.id} onClick={() => setJornadaActivaId(j.id)} style={{ ...styles.errorChip, ...(activa ? styles.errorChipActive : {}) }}>
-                    {fechaLabel(j.fecha)} · {n}{j.editable === false ? " 🔒" : ""}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        );
-      })()}
+      <AvisosJornadas evento={evento} jornadaActivaId={jornadaActivaId} onIr={setJornadaActivaId} />
 
       <div style={{ marginBottom: 16 }}>
         <button onClick={() => setMostrarPapel((v) => !v)} style={styles.linkBtn}>{mostrarPapel ? "▲" : "▼"} Plantilla / importar</button>
@@ -1249,9 +1251,10 @@ function ConteoView({ evento, role, upd, jornada, jornadaActivaId, setJornadaAct
   );
 }
 
-function ResumenView({ evento }) {
+function ResumenView({ evento, setTab, setJornadaActivaId }) {
   if (evento.jornadas.length === 0) return <div style={styles.empty}>Sin jornadas todavía.</div>;
   if (evento.productos.length === 0) return <div style={styles.empty}>Sin referencias todavía.</div>;
+  const irAJornada = (id) => { if (setJornadaActivaId) setJornadaActivaId(id); if (setTab) setTab("conteo"); };
 
   // Totales por referencia, sumando todas las jornadas y ubicaciones.
   const totalRef = (pid) => {
@@ -1265,6 +1268,7 @@ function ResumenView({ evento }) {
 
   return (
     <div>
+      <AvisosJornadas evento={evento} jornadaActivaId={null} onIr={irAJornada} />
       <div style={styles.dimText}>Total por referencia, sumando todas las jornadas y ubicaciones del evento.</div>
       <button onClick={() => descargarResumenExcel(evento)} style={{ ...styles.exportBtn, marginBottom: 18 }}>↓ Descargar resumen (Excel)</button>
       <div style={{ overflowX: "auto" }}>
