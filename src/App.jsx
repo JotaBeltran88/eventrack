@@ -142,9 +142,8 @@ function celdaSospechosa(jornada, ubic, pid) {
 // Banners de aviso (días sin terminar + valores a revisar). onIr(jornadaId)
 // se llama al tocar un día. Reutilizado en Conteo y Resumen.
 function AvisosJornadas({ evento, jornadaActivaId, onIr }) {
-  const pendientes = evento.jornadas
-    .map((j) => ({ j, pend: jornadaPendienteConfirmar(evento, j).length }))
-    .filter((x) => x.pend > 0);
+  const pendientes = [];
+  evento.jornadas.forEach((j) => jornadaPendienteConfirmar(evento, j).forEach((u) => pendientes.push({ j, ubic: u })));
   const conIssues = evento.jornadas.map((j) => ({ j, n: jornadaRevisar(evento, j).length })).filter((x) => x.n > 0);
   if (pendientes.length === 0 && conIssues.length === 0) return null;
   const totalIssues = conIssues.reduce((s, x) => s + x.n, 0);
@@ -153,17 +152,17 @@ function AvisosJornadas({ evento, jornadaActivaId, onIr }) {
       {pendientes.length > 0 && (
         <div style={styles.alertBox}>
           <div style={{ fontWeight: 700, color: COLORS.amber, marginBottom: 8 }}>
-            ⚠ {pendientes.length === 1 ? "1 día con datos sin confirmar" : `${pendientes.length} días con datos sin confirmar`}
+            ⚠ {pendientes.length === 1 ? "1 ubicación con datos sin confirmar" : `${pendientes.length} ubicaciones con datos sin confirmar`}
           </div>
           <div style={{ fontSize: 12.5, color: COLORS.dim, marginBottom: 9 }}>
-            Tienen información introducida pero sin confirmar. Toca un día para revisarlo y confirmarlo (las ubicaciones confirmadas llevan ✓).
+            Tienen información introducida pero sin confirmar. Toca una para ir a revisarla y confirmarla.
           </div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
-            {pendientes.map(({ j, pend }) => {
+            {pendientes.map(({ j, ubic }) => {
               const activa = j.id === jornadaActivaId;
               return (
-                <button key={j.id} onClick={() => onIr(j.id)} style={{ ...styles.alertChip, ...(activa ? styles.alertChipActive : {}) }}>
-                  {fechaLabel(j.fecha)} · {pend} sin confirmar{j.editable === false ? " 🔒" : ""}
+                <button key={j.id + "·" + ubic} onClick={() => onIr(j.id, ubic)} style={{ ...styles.alertChip, ...(activa ? styles.alertChipActive : {}) }}>
+                  {fechaLabel(j.fecha)} · {ubic}{j.editable === false ? " 🔒" : ""}
                 </button>
               );
             })}
@@ -683,7 +682,7 @@ function EventoDetalle({ evento, role, updateEvento, onGuardar }) {
       {tab === "conteo" && (
         <ConteoView evento={evento} role={role} upd={upd} jornada={jornadaActiva} jornadaActivaId={jornadaActivaId} setJornadaActivaId={setJornadaActivaId} ubicActiva={ubicActiva} setUbicActiva={setUbicActiva} onGuardar={onGuardar} />
       )}
-      {tab === "resumen" && <ResumenView evento={evento} setTab={setTab} setJornadaActivaId={setJornadaActivaId} />}
+      {tab === "resumen" && <ResumenView evento={evento} setTab={setTab} setJornadaActivaId={setJornadaActivaId} setUbicActiva={setUbicActiva} />}
     </div>
   );
 }
@@ -1123,7 +1122,7 @@ function ConteoView({ evento, role, upd, jornada, jornadaActivaId, setJornadaAct
     <div>
       <JornadaSelector evento={evento} jornadaActivaId={jornadaActivaId} setJornadaActivaId={setJornadaActivaId} />
 
-      <AvisosJornadas evento={evento} jornadaActivaId={jornadaActivaId} onIr={setJornadaActivaId} />
+      <AvisosJornadas evento={evento} jornadaActivaId={jornadaActivaId} onIr={(id, u) => { setJornadaActivaId(id); if (u) setUbicActiva(u); }} />
 
       <div style={{ marginBottom: 16 }}>
         <button onClick={() => setMostrarPapel((v) => !v)} style={styles.linkBtn}>{mostrarPapel ? "▲" : "▼"} Plantilla / importar</button>
@@ -1274,10 +1273,10 @@ function ConteoView({ evento, role, upd, jornada, jornadaActivaId, setJornadaAct
   );
 }
 
-function ResumenView({ evento, setTab, setJornadaActivaId }) {
+function ResumenView({ evento, setTab, setJornadaActivaId, setUbicActiva }) {
   if (evento.jornadas.length === 0) return <div style={styles.empty}>Sin jornadas todavía.</div>;
   if (evento.productos.length === 0) return <div style={styles.empty}>Sin referencias todavía.</div>;
-  const irAJornada = (id) => { if (setJornadaActivaId) setJornadaActivaId(id); if (setTab) setTab("conteo"); };
+  const irAJornada = (id, u) => { if (setJornadaActivaId) setJornadaActivaId(id); if (u && setUbicActiva) setUbicActiva(u); if (setTab) setTab("conteo"); };
 
   // Totales por referencia, sumando todas las jornadas y ubicaciones.
   const totalRef = (pid) => {
