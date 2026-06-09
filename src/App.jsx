@@ -160,9 +160,10 @@ function AvisosJornadas({ evento, jornadaActivaId, onIr }) {
           <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
             {pendientes.map(({ j, ubic }) => {
               const activa = j.id === jornadaActivaId;
+              const quien = (j.realizadoPor && j.realizadoPor[ubic]) || "";
               return (
                 <button key={j.id + "·" + ubic} onClick={() => onIr(j.id, ubic)} style={{ ...styles.alertChip, ...(activa ? styles.alertChipActive : {}) }}>
-                  {fechaLabel(j.fecha)} · {ubic}{j.editable === false ? " 🔒" : ""}
+                  {fechaLabel(j.fecha)} · {ubic}{quien ? ` · ${quien}` : ""}{j.editable === false ? " 🔒" : ""}
                 </button>
               );
             })}
