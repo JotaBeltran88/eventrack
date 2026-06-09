@@ -1378,10 +1378,8 @@ function resumenProducto(evento, pid) {
     js.forEach((j) => {
       const t = celdaTotales(j, u, pid);
       ent += t.ent; sal += t.sal;
-      if ((t.base || 0) !== 0 || (t.fin || 0) !== 0) {
-        if (opening === null) opening = t.base; // primer día con datos
-        closing = t.fin;                         // se queda con el último
-      }
+      if (opening === null && (t.base || 0) !== 0) opening = t.base; // primer día con Inicial real
+      if ((t.fin || 0) !== 0) closing = t.fin;                       // último día con Final realmente contado
     });
     ini += opening || 0;
     fin += closing || 0;
