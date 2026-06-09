@@ -1302,20 +1302,13 @@ function ResumenView({ evento, setTab, setJornadaActivaId, setUbicActiva }) {
   if (evento.productos.length === 0) return <div style={styles.empty}>Sin referencias todavía.</div>;
   const irAJornada = (id, u) => { if (setJornadaActivaId) setJornadaActivaId(id); if (u && setUbicActiva) setUbicActiva(u); if (setTab) setTab("conteo"); };
 
-  // Totales por referencia, sumando todas las jornadas y ubicaciones.
-  const totalRef = (pid) => {
-    let ini = 0, fin = 0, ent = 0, sal = 0, con = 0;
-    evento.jornadas.forEach((j) => evento.ubicaciones.forEach((u) => {
-      const t = celdaTotales(j, u, pid);
-      ini += t.base; fin += t.fin; ent += t.ent; sal += t.sal; con += t.con;
-    }));
-    return { ini, fin, ent, sal, con };
-  };
+  // Total por referencia en el evento (encadenado: no suma los iniciales de cada día).
+  const totalRef = (pid) => resumenProducto(evento, pid);
 
   return (
     <div>
       <AvisosJornadas evento={evento} jornadaActivaId={null} onIr={irAJornada} />
-      <div style={styles.dimText}>Total por referencia, sumando todas las jornadas y ubicaciones del evento.</div>
+      <div style={styles.dimText}>Total del evento por referencia. Inicial = stock del primer día · Final = stock del último día · Consumo = Inicial + Entradas − Salidas − Final (no se suman los iniciales de cada día).</div>
       <button onClick={() => descargarResumenExcel(evento)} style={{ ...styles.exportBtn, marginBottom: 18 }}>↓ Descargar resumen (Excel)</button>
       <div style={{ overflowX: "auto" }}>
         <table style={styles.matrix}>
@@ -1371,6 +1364,29 @@ function celdaTotales(jornada, ubic, pid) {
   }
   const ini = base + ent - sal; // stock disponible
   return { base, ini, fin, ent, sal, con: Math.max(0, ini - fin) };
+}
+
+// Resumen ENCADENADO de un producto en TODO el evento (el stock que queda un
+// día es el inicial del siguiente). No suma los iniciales de cada día:
+//   Inicial = stock del primer día con datos · Final = del último día con datos
+//   Entradas/Salidas = totales del evento · Consumo = Inicial + Entradas − Salidas − Final
+function resumenProducto(evento, pid) {
+  const js = [...evento.jornadas].sort((a, b) => String(a.fecha || "").localeCompare(String(b.fecha || "")));
+  let ini = 0, fin = 0, ent = 0, sal = 0;
+  evento.ubicaciones.forEach((u) => {
+    let opening = null, closing = null;
+    js.forEach((j) => {
+      const t = celdaTotales(j, u, pid);
+      ent += t.ent; sal += t.sal;
+      if ((t.base || 0) !== 0 || (t.fin || 0) !== 0) {
+        if (opening === null) opening = t.base; // primer día con datos
+        closing = t.fin;                         // se queda con el último
+      }
+    });
+    ini += opening || 0;
+    fin += closing || 0;
+  });
+  return { ini, fin, ent, sal, con: Math.max(0, ini + ent - sal - fin) };
 }
 
 // Construye la hoja de inventario de UNA jornada en formato cruzado:
@@ -1490,12 +1506,8 @@ function descargarPlantillaInventario(evento) {
 function descargarResumenExcel(evento) {
   const wb = XLSX.utils.book_new();
   const filas = evento.productos.map((p) => {
-    let ini = 0, fin = 0, ent = 0, sal = 0, con = 0;
-    evento.jornadas.forEach((j) => evento.ubicaciones.forEach((u) => {
-      const t = celdaTotales(j, u, p.id);
-      ini += t.base; fin += t.fin; ent += t.ent; sal += t.sal; con += t.con;
-    }));
-    return { Producto: p.nombre, "Categoría": p.categoria, Unidad: p.unidad, "Inicial total": ini, "Entradas": ent, "Salidas": sal, "Final total": fin, "Consumo total": con };
+    const { ini, fin, ent, sal, con } = resumenProducto(evento, p.id);
+    return { Producto: p.nombre, "Categoría": p.categoria, Unidad: p.unidad, "Inicial (primer día)": ini, "Entradas": ent, "Salidas": sal, "Final (último día)": fin, "Consumo total": con };
   });
   const ws = XLSX.utils.json_to_sheet(filas);
   ws["!cols"] = [{ wch: 26 }, { wch: 14 }, { wch: 10 }, { wch: 12 }, { wch: 10 }, { wch: 10 }, { wch: 12 }, { wch: 14 }];
@@ -1531,12 +1543,8 @@ function ExportButton({ evento }) {
 
     if (evento.productos.length) {
       const acc = evento.productos.map((p) => {
-        let ini = 0, fin = 0, ent = 0, sal = 0, con = 0;
-        evento.jornadas.forEach((j) => evento.ubicaciones.forEach((u) => {
-          const t = celdaTotales(j, u, p.id);
-          ini += t.base; fin += t.fin; ent += t.ent; sal += t.sal; con += t.con;
-        }));
-        return { Producto: p.nombre, "Categoría": p.categoria, Unidad: p.unidad, "Inicial total": ini, "Entradas": ent, "Salidas": sal, "Final total": fin, "Consumo total": con };
+        const { ini, fin, ent, sal, con } = resumenProducto(evento, p.id);
+        return { Producto: p.nombre, "Categoría": p.categoria, Unidad: p.unidad, "Inicial (primer día)": ini, "Entradas": ent, "Salidas": sal, "Final (último día)": fin, "Consumo total": con };
       });
       const ws = XLSX.utils.json_to_sheet(acc);
       ws["!cols"] = [{ wch: 26 }, { wch: 14 }, { wch: 10 }, { wch: 12 }, { wch: 10 }, { wch: 10 }, { wch: 12 }, { wch: 14 }];
