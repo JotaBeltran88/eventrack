@@ -116,9 +116,14 @@ function ubicacionTieneDatos(j, u) {
   return false;
 }
 
-// Ubicaciones de una jornada con datos metidos pero SIN confirmar (lo que avisa la alerta).
+// Ubicaciones de una jornada SIN confirmar que tienen algo iniciado: datos
+// (Inicial/Final/movimientos) o al menos un nombre en "Realizado por".
 function jornadaPendienteConfirmar(evento, j) {
-  return evento.ubicaciones.filter((u) => !(j.confirmado && j.confirmado[u]) && ubicacionTieneDatos(j, u));
+  return evento.ubicaciones.filter((u) => {
+    if (j.confirmado && j.confirmado[u]) return false;
+    const tieneNombre = !!(j.realizadoPor && j.realizadoPor[u] && String(j.realizadoPor[u]).trim());
+    return tieneNombre || ubicacionTieneDatos(j, u);
+  });
 }
 
 // Valores sospechosos de una jornada: celdas donde el Final supera lo disponible
