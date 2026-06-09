@@ -144,37 +144,37 @@ function jornadaPendienteConfirmar(evento, j) {
   });
 }
 
-// Revisión de valores imposibles en TODO el evento, respetando el ENCADENADO.
-// El stock disponible al empezar un día = el Inicial contado ese día; si ese día
-// no se contó Inicial, se arrastra el stock que quedó el día anterior. Se marca un
-// Final que supere ese disponible (+ entradas − salidas) ⇒ imposible (error de tecleo).
-// Devuelve { incidencias:[{jId,fecha,ubic,pid,prod,cat,fin,disp}], susp:Set("jId|ubic|pid") }.
-function revisarEvento(evento) {
+// Cálculo ENCADENADO de TODO el evento. El Inicial efectivo de un día es el
+// Inicial contado ese día; si no se contó, se ARRASTRA el stock que quedó el día
+// anterior (Final del día previo). Por celda (jId|ubic|pid) devuelve
+// { effIni, ent, sal, disp, fin, con, carried }. carried = el Inicial viene
+// arrastrado (no se tecleó ese día). Además incidencias[] (Final > disponible,
+// imposible) y susp:Set. Es la fuente única para Conteo, consumo y avisos.
+function calcEvento(evento) {
   const js = [...evento.jornadas].sort((a, b) => String(a.fecha || "").localeCompare(String(b.fecha || "")));
+  const cell = {};
   const incidencias = [];
-  const susp = new Set();
   for (const u of evento.ubicaciones) {
     for (const p of evento.productos) {
       let stock = null; // stock conocido al entrar al día (null = aún desconocido)
       for (const j of js) {
         const t = celdaTotales(j, u, p.id);
-        let avail = null;
-        if ((t.base || 0) > 0) avail = t.base;        // contó el Inicial ese día
-        else if (stock != null) avail = stock;         // arrastra el del día anterior
-        if (avail != null) {
-          const disp = avail + t.ent - t.sal;
-          if (t.fin > 0 && t.fin > disp) {
-            incidencias.push({ jId: j.id, fecha: j.fecha, ubic: u, pid: p.id, prod: p.nombre, cat: p.categoria, fin: t.fin, disp });
-            susp.add(j.id + "|" + u + "|" + p.id);
-          }
-          stock = (t.fin > 0) ? t.fin : disp; // lo que queda para el día siguiente
-        } else if (t.fin > 0) {
-          stock = t.fin; // primer dato sin Inicial conocido: lo fijamos sin validar
-        }
+        const tecleado = (t.base || 0) > 0;
+        const validable = tecleado || stock != null;
+        const effIni = tecleado ? t.base : (stock != null ? stock : 0);
+        const carried = !tecleado && stock != null && effIni > 0;
+        const disp = effIni + t.ent - t.sal;
+        const fin = t.fin;
+        const con = Math.max(0, disp - fin);
+        const susp = validable && fin > 0 && fin > disp;
+        cell[j.id + "|" + u + "|" + p.id] = { effIni, ent: t.ent, sal: t.sal, disp, fin, con, carried, susp };
+        if (susp) incidencias.push({ jId: j.id, fecha: j.fecha, ubic: u, pid: p.id, prod: p.nombre, cat: p.categoria, fin, disp });
+        if (tecleado || fin > 0 || t.ent || t.sal) stock = (fin > 0) ? fin : disp; // lo que queda
       }
     }
   }
-  return { incidencias, susp };
+  const susp = new Set(incidencias.map((i) => i.jId + "|" + i.ubic + "|" + i.pid));
+  return { cell, incidencias, susp };
 }
 
 // Banners de aviso (días sin terminar + valores a revisar). onIr(jornadaId)
@@ -182,7 +182,7 @@ function revisarEvento(evento) {
 function AvisosJornadas({ evento, jornadaActivaId, onIr, revision }) {
   const pendientes = [];
   evento.jornadas.forEach((j) => jornadaPendienteConfirmar(evento, j).forEach((u) => pendientes.push({ j, ubic: u })));
-  const rev = React.useMemo(() => revision || revisarEvento(evento), [revision, evento]);
+  const rev = React.useMemo(() => revision || calcEvento(evento), [revision, evento]);
   const incidencias = rev.incidencias;
   const MAX = 40;
   if (pendientes.length === 0 && incidencias.length === 0) return null;
@@ -978,7 +978,7 @@ function ConteoView({ evento, role, upd, jornada, jornadaActivaId, setJornadaAct
   const invFileRef = React.useRef(null);
   const [mostrarPapel, setMostrarPapel] = useState(false);
   const [mostrarMov, setMostrarMov] = useState(false);
-  const revision = React.useMemo(() => revisarEvento(evento), [evento]);
+  const revision = React.useMemo(() => calcEvento(evento), [evento]);
   if (evento.ubicaciones.length === 0 || evento.productos.length === 0)
     return <div style={styles.empty}>Necesitas ubicaciones y referencias (Configuración) para el conteo.</div>;
   if (evento.jornadas.length === 0)
@@ -1223,19 +1223,19 @@ function ConteoView({ evento, role, upd, jornada, jornadaActivaId, setJornadaAct
           </div>
           {evento.productos.filter((p) => p.categoria === catSel).map((p) => {
             const c = getCell(ubicActiva, p.id);
-            const t = celdaTotales(jornada, ubicActiva, p.id);
-            const sospechosa = revision.susp.has(jornada.id + "|" + ubicActiva + "|" + p.id);
-            const incDisp = sospechosa ? (revision.incidencias.find((i) => i.jId === jornada.id && i.ubic === ubicActiva && i.pid === p.id) || {}).disp : 0;
+            const cc = revision.cell[jornada.id + "|" + ubicActiva + "|" + p.id] || { effIni: 0, ent: 0, sal: 0, disp: 0, fin: 0, con: 0, carried: false, susp: false };
+            const sospechosa = !!cc.susp;
             return (
               <div key={p.id} style={styles.row}>
                 <span style={{ flex: 2 }}>
                   <span style={{ color: COLORS.cream }}>{p.nombre}</span><span style={styles.unidad}> · {p.unidad}</span>
-                  {(t.ent > 0 || t.sal > 0) && <div style={styles.movHint}>{t.ent > 0 ? `▲ +${t.ent} ` : ""}{t.sal > 0 ? `▼ −${t.sal} ` : ""}· disponible {t.ini}</div>}
-                  {sospechosa && <div style={{ ...styles.movHint, color: COLORS.red, fontWeight: 600 }}>⛔ Final ({t.fin}) mayor que el disponible ({incDisp}) — revisa el número</div>}
+                  {cc.carried && <div style={styles.movHint}>↩ Inicial arrastrado del día anterior: {cc.effIni}</div>}
+                  {(cc.ent > 0 || cc.sal > 0) && <div style={styles.movHint}>{cc.ent > 0 ? `▲ +${cc.ent} ` : ""}{cc.sal > 0 ? `▼ −${cc.sal} ` : ""}· disponible {cc.disp}</div>}
+                  {sospechosa && <div style={{ ...styles.movHint, color: COLORS.red, fontWeight: 600 }}>⛔ Final ({cc.fin}) mayor que el disponible ({cc.disp}) — revisa el número</div>}
                 </span>
-                <input type="number" min="0" value={c.inicial || ""} placeholder="0" disabled={!puedeInicial} onChange={(e) => setValor(p.id, "inicial", e.target.value)} style={{ ...styles.input, ...(puedeInicial ? {} : styles.inputDisabled) }} />
+                <input type="number" min="0" value={cc.effIni || ""} placeholder="0" disabled={!puedeInicial} onChange={(e) => setValor(p.id, "inicial", e.target.value)} style={{ ...styles.input, ...(puedeInicial ? {} : styles.inputDisabled), ...(cc.carried ? { color: COLORS.dim } : {}) }} />
                 <input type="number" min="0" value={c.final || ""} placeholder="0" disabled={!puedeContar} onChange={(e) => setValor(p.id, "final", e.target.value)} style={{ ...styles.input, ...(puedeContar ? {} : styles.inputDisabled), ...(sospechosa ? styles.inputError : {}) }} />
-                <span style={{ ...styles.colNum, color: t.con > 0 ? COLORS.gold : COLORS.dim, fontWeight: 600 }}>{t.con}</span>
+                <span style={{ ...styles.colNum, color: cc.con > 0 ? COLORS.gold : COLORS.dim, fontWeight: 600 }}>{cc.con}</span>
               </div>
             );
           })}
@@ -1411,7 +1411,9 @@ function resumenProducto(evento, pid) {
 // Construye la hoja de inventario de UNA jornada en formato cruzado:
 // una fila por producto, y por cada ubicación (más un grupo Total) las
 // columnas Inicial / Final / Consumo, con cabecera de dos niveles.
-function hojaInventarioJornada(evento, jornada) {
+function hojaInventarioJornada(evento, jornada, calc) {
+  calc = calc || calcEvento(evento);
+  const cellOf = (u, pid) => calc.cell[jornada.id + "|" + u + "|" + pid] || { effIni: 0, fin: 0, con: 0 };
   const ubic = evento.ubicaciones;
   const grupos = ["Total", ...ubic];
 
@@ -1424,9 +1426,9 @@ function hojaInventarioJornada(evento, jornada) {
   evento.productos.forEach((p) => {
     const row = [p.categoria, p.nombre, p.unidad];
     let tIni = 0, tFin = 0, tCon = 0;
-    ubic.forEach((u) => { const t = celdaTotales(jornada, u, p.id); tIni += t.ini; tFin += t.fin; tCon += t.con; });
+    ubic.forEach((u) => { const t = cellOf(u, p.id); tIni += t.effIni; tFin += t.fin; tCon += t.con; });
     row.push(tIni, tFin, tCon);
-    ubic.forEach((u) => { const t = celdaTotales(jornada, u, p.id); row.push(t.ini, t.fin, t.con); });
+    ubic.forEach((u) => { const t = cellOf(u, p.id); row.push(t.effIni, t.fin, t.con); });
     filas.push(row);
   });
 
@@ -1537,11 +1539,12 @@ function descargarResumenExcel(evento) {
 function ExportButton({ evento }) {
   const exportar = () => {
     const wb = XLSX.utils.book_new();
-    const cons = (j, u, pid) => celdaTotales(j, u, pid).con;
+    const calc = calcEvento(evento);
+    const cellOf = (j, u, pid) => calc.cell[j.id + "|" + u + "|" + pid] || { effIni: 0, ent: 0, sal: 0, fin: 0, con: 0 };
 
     if (evento.jornadas.length) {
       const filas = evento.jornadas.map((j) => {
-        const consumo = evento.ubicaciones.reduce((a, u) => a + evento.productos.reduce((aa, p) => aa + cons(j, u, p.id), 0), 0);
+        const consumo = evento.ubicaciones.reduce((a, u) => a + evento.productos.reduce((aa, p) => aa + cellOf(j, u, p.id).con, 0), 0);
         return { Jornada: j.fecha || "(sin fecha)", "Consumo total": consumo };
       });
       const ws = XLSX.utils.json_to_sheet(filas);
@@ -1551,8 +1554,8 @@ function ExportButton({ evento }) {
 
     const detalle = [];
     evento.jornadas.forEach((j) => evento.ubicaciones.forEach((u) => evento.productos.forEach((p) => {
-      const t = celdaTotales(j, u, p.id);
-      detalle.push({ Jornada: j.fecha, "Ubicación": u, "Categoría": p.categoria, Producto: p.nombre, Unidad: p.unidad, Inicial: t.base, Entradas: t.ent, Salidas: t.sal, Final: t.fin, Consumo: t.con });
+      const t = cellOf(j, u, p.id);
+      detalle.push({ Jornada: j.fecha, "Ubicación": u, "Categoría": p.categoria, Producto: p.nombre, Unidad: p.unidad, Inicial: t.effIni, Entradas: t.ent, Salidas: t.sal, Final: t.fin, Consumo: t.con });
     })));
     if (detalle.length) {
       const ws = XLSX.utils.json_to_sheet(detalle);
