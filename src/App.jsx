@@ -101,6 +101,26 @@ function jornadaEstado(evento, j) {
   return { total, conf, completo: total > 0 && conf === total, empezado: conf > 0 };
 }
 
+// ¿Una ubicación tiene información introducida? (algún Inicial/Final o algún movimiento)
+function ubicacionTieneDatos(j, u) {
+  const cont = j.conteo && j.conteo[u];
+  if (cont) {
+    for (const pid in cont) {
+      const c = cont[pid] || {};
+      if ((c.inicial || 0) !== 0 || (c.final || 0) !== 0) return true;
+    }
+  }
+  for (const m of (j.movimientos || [])) {
+    if (m.ubic === u || m.destino === u) return true;
+  }
+  return false;
+}
+
+// Ubicaciones de una jornada con datos metidos pero SIN confirmar (lo que avisa la alerta).
+function jornadaPendienteConfirmar(evento, j) {
+  return evento.ubicaciones.filter((u) => !(j.confirmado && j.confirmado[u]) && ubicacionTieneDatos(j, u));
+}
+
 // Valores sospechosos de una jornada: celdas donde el Final supera lo disponible
 // (Final > inicial + entradas − salidas) ⇒ imposible, casi siempre un error de tecleo.
 function jornadaRevisar(evento, j) {
@@ -122,27 +142,28 @@ function celdaSospechosa(jornada, ubic, pid) {
 // Banners de aviso (días sin terminar + valores a revisar). onIr(jornadaId)
 // se llama al tocar un día. Reutilizado en Conteo y Resumen.
 function AvisosJornadas({ evento, jornadaActivaId, onIr }) {
-  const incompletas = evento.jornadas.filter((j) => !jornadaEstado(evento, j).completo);
+  const pendientes = evento.jornadas
+    .map((j) => ({ j, pend: jornadaPendienteConfirmar(evento, j).length }))
+    .filter((x) => x.pend > 0);
   const conIssues = evento.jornadas.map((j) => ({ j, n: jornadaRevisar(evento, j).length })).filter((x) => x.n > 0);
-  if (incompletas.length === 0 && conIssues.length === 0) return null;
+  if (pendientes.length === 0 && conIssues.length === 0) return null;
   const totalIssues = conIssues.reduce((s, x) => s + x.n, 0);
   return (
     <>
-      {incompletas.length > 0 && (
+      {pendientes.length > 0 && (
         <div style={styles.alertBox}>
           <div style={{ fontWeight: 700, color: COLORS.amber, marginBottom: 8 }}>
-            ⚠ {incompletas.length === 1 ? "1 día sin terminar" : `${incompletas.length} días sin terminar`}
+            ⚠ {pendientes.length === 1 ? "1 día con datos sin confirmar" : `${pendientes.length} días con datos sin confirmar`}
           </div>
           <div style={{ fontSize: 12.5, color: COLORS.dim, marginBottom: 9 }}>
-            Toca un día para ir a revisarlo. Faltan ubicaciones por confirmar (las que no tienen ✓).
+            Tienen información introducida pero sin confirmar. Toca un día para revisarlo y confirmarlo (las ubicaciones confirmadas llevan ✓).
           </div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
-            {incompletas.map((j) => {
-              const { conf, total } = jornadaEstado(evento, j);
+            {pendientes.map(({ j, pend }) => {
               const activa = j.id === jornadaActivaId;
               return (
                 <button key={j.id} onClick={() => onIr(j.id)} style={{ ...styles.alertChip, ...(activa ? styles.alertChipActive : {}) }}>
-                  {fechaLabel(j.fecha)} · {conf}/{total}{j.editable === false ? " 🔒" : ""}
+                  {fechaLabel(j.fecha)} · {pend} sin confirmar{j.editable === false ? " 🔒" : ""}
                 </button>
               );
             })}
@@ -883,8 +904,10 @@ function JornadaSelector({ evento, jornadaActivaId, setJornadaActivaId }) {
         <select value={jornadaActivaId || ""} onChange={(e) => setJornadaActivaId(e.target.value)} style={styles.select}>
           {evento.jornadas.map((j) => {
             const { total, conf, completo } = jornadaEstado(evento, j);
+            const pend = jornadaPendienteConfirmar(evento, j).length;
+            const marca = completo ? " ✓" : (pend > 0 ? " ⚠ sin confirmar" : "");
             return (
-              <option key={j.id} value={j.id}>{fechaLabel(j.fecha)} · {conf}/{total}{completo ? " ✓" : " ⚠ sin terminar"}{j.editable === false ? " · 🔒" : ""}</option>
+              <option key={j.id} value={j.id}>{fechaLabel(j.fecha)} · {conf}/{total}{marca}{j.editable === false ? " · 🔒" : ""}</option>
             );
           })}
         </select>
