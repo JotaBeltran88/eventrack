@@ -93,6 +93,7 @@ const COLORS = {
   bg: "#f7f8fa", panel: "#ffffff", panel2: "#f1f2f6", line: "#e6e8ee",
   gold: "#4f46e5", goldDim: "#8b90a8", cream: "#1f2430", dim: "#6b7280",
   green: "#1a9d5f", red: "#dc2626", amber: "#d97706", amberBg: "#fff7ed", amberLine: "#fed7aa",
+  info: "#2563eb", infoBg: "#eff6ff", infoLine: "#bfdbfe",
 };
 
 // Estado de completitud de una jornada: cuántas ubicaciones están confirmadas.
@@ -154,6 +155,7 @@ function calcEvento(evento) {
   const js = [...evento.jornadas].sort((a, b) => String(a.fecha || "").localeCompare(String(b.fecha || "")));
   const cell = {};
   const incidencias = [];
+  const sinFinal = []; // celdas con Inicial tecleado > 0 pero Final 0 (no contado) → consumo no real
   for (const u of evento.ubicaciones) {
     for (const p of evento.productos) {
       let stock = null; // stock conocido al entrar al día (null = aún desconocido)
@@ -167,14 +169,16 @@ function calcEvento(evento) {
         const fin = t.fin;
         const con = Math.max(0, disp - fin);
         const susp = validable && fin > 0 && fin > disp;
-        cell[j.id + "|" + u + "|" + p.id] = { effIni, ent: t.ent, sal: t.sal, disp, fin, con, carried, susp };
+        const faltaFinal = tecleado && fin === 0; // hay Inicial real pero no se contó el Final
+        cell[j.id + "|" + u + "|" + p.id] = { effIni, ent: t.ent, sal: t.sal, disp, fin, con, carried, susp, faltaFinal };
         if (susp) incidencias.push({ jId: j.id, fecha: j.fecha, ubic: u, pid: p.id, prod: p.nombre, cat: p.categoria, fin, disp });
+        if (faltaFinal) sinFinal.push({ jId: j.id, fecha: j.fecha, ubic: u, pid: p.id, prod: p.nombre, cat: p.categoria, ini: t.base });
         if (tecleado || fin > 0 || t.ent || t.sal) stock = (fin > 0) ? fin : disp; // lo que queda
       }
     }
   }
   const susp = new Set(incidencias.map((i) => i.jId + "|" + i.ubic + "|" + i.pid));
-  return { cell, incidencias, susp };
+  return { cell, incidencias, susp, sinFinal };
 }
 
 // Banners de aviso (días sin terminar + valores a revisar). onIr(jornadaId)
@@ -185,7 +189,15 @@ function AvisosJornadas({ evento, jornadaActivaId, onIr, revision }) {
   const rev = React.useMemo(() => revision || calcEvento(evento), [revision, evento]);
   const incidencias = rev.incidencias;
   const MAX = 40;
-  if (pendientes.length === 0 && incidencias.length === 0) return null;
+  // "Stock sin Final" agrupado por (jornada, ubicación)
+  const sfMap = {};
+  (rev.sinFinal || []).forEach((it) => {
+    const key = it.jId + "|" + it.ubic;
+    if (!sfMap[key]) sfMap[key] = { jId: it.jId, fecha: it.fecha, ubic: it.ubic, n: 0 };
+    sfMap[key].n++;
+  });
+  const sinFinalBarras = Object.values(sfMap);
+  if (pendientes.length === 0 && incidencias.length === 0 && sinFinalBarras.length === 0) return null;
   return (
     <>
       {pendientes.length > 0 && (
@@ -228,6 +240,29 @@ function AvisosJornadas({ evento, jornadaActivaId, onIr, revision }) {
             })}
             {incidencias.length > MAX && (
               <span style={{ fontSize: 12.5, color: COLORS.dim, alignSelf: "center" }}>+{incidencias.length - MAX} más</span>
+            )}
+          </div>
+        </div>
+      )}
+      {sinFinalBarras.length > 0 && (
+        <div style={styles.infoBox}>
+          <div style={{ fontWeight: 700, color: COLORS.info, marginBottom: 8 }}>
+            ℹ️ {sinFinalBarras.length === 1 ? "1 ubicación con stock sin contar el Final" : `${sinFinalBarras.length} ubicaciones con stock sin contar el Final`}
+          </div>
+          <div style={{ fontSize: 12.5, color: COLORS.dim, marginBottom: 9 }}>
+            Tienen referencias con Inicial pero el Final a 0 (sin contar). El consumo de esas referencias no es real: se cuentan como consumidas del todo. Toca una para ir a contar el Final.
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
+            {sinFinalBarras.slice(0, MAX).map((b) => {
+              const activa = b.jId === jornadaActivaId;
+              return (
+                <button key={b.jId + "|" + b.ubic} onClick={() => onIr(b.jId, b.ubic)} style={{ ...styles.infoChip, ...(activa ? styles.infoChipActive : {}) }}>
+                  {fechaLabel(b.fecha)} · {b.ubic} · {b.n} sin Final
+                </button>
+              );
+            })}
+            {sinFinalBarras.length > MAX && (
+              <span style={{ fontSize: 12.5, color: COLORS.dim, alignSelf: "center" }}>+{sinFinalBarras.length - MAX} más</span>
             )}
           </div>
         </div>
@@ -1232,9 +1267,10 @@ function ConteoView({ evento, role, upd, jornada, jornadaActivaId, setJornadaAct
                   {cc.carried && <div style={styles.movHint}>↩ Inicial arrastrado del día anterior: {cc.effIni}</div>}
                   {(cc.ent > 0 || cc.sal > 0) && <div style={styles.movHint}>{cc.ent > 0 ? `▲ +${cc.ent} ` : ""}{cc.sal > 0 ? `▼ −${cc.sal} ` : ""}· disponible {cc.disp}</div>}
                   {sospechosa && <div style={{ ...styles.movHint, color: COLORS.red, fontWeight: 600 }}>⛔ Final ({cc.fin}) mayor que el disponible ({cc.disp}) — revisa el número</div>}
+                  {cc.faltaFinal && <div style={{ ...styles.movHint, color: COLORS.info, fontWeight: 600 }}>↳ Tiene stock ({cc.effIni}) y el Final sin contar (0) — el consumo no es real</div>}
                 </span>
                 <input type="number" min="0" value={cc.effIni || ""} placeholder="0" disabled={!puedeInicial} onChange={(e) => setValor(p.id, "inicial", e.target.value)} style={{ ...styles.input, ...(puedeInicial ? {} : styles.inputDisabled), ...(cc.carried ? { color: COLORS.dim } : {}) }} />
-                <input type="number" min="0" value={c.final || ""} placeholder="0" disabled={!puedeContar} onChange={(e) => setValor(p.id, "final", e.target.value)} style={{ ...styles.input, ...(puedeContar ? {} : styles.inputDisabled), ...(sospechosa ? styles.inputError : {}) }} />
+                <input type="number" min="0" value={c.final || ""} placeholder="0" disabled={!puedeContar} onChange={(e) => setValor(p.id, "final", e.target.value)} style={{ ...styles.input, ...(puedeContar ? {} : styles.inputDisabled), ...(sospechosa ? styles.inputError : {}), ...(cc.faltaFinal ? { borderColor: COLORS.info } : {}) }} />
                 <span style={{ ...styles.colNum, color: cc.con > 0 ? COLORS.gold : COLORS.dim, fontWeight: 600 }}>{cc.con}</span>
               </div>
             );
@@ -1758,6 +1794,9 @@ const styles = {
   errorChip: { background: COLORS.panel, border: `1px solid #fecaca`, color: COLORS.red, padding: "7px 13px", borderRadius: 20, fontSize: 13, fontWeight: 600 },
   errorChipActive: { background: COLORS.red, color: "#ffffff", borderColor: COLORS.red },
   inputError: { borderColor: COLORS.red, background: "#fef2f2" },
+  infoBox: { background: COLORS.infoBg, border: `1px solid ${COLORS.infoLine}`, borderRadius: 10, padding: "12px 14px", marginBottom: 18 },
+  infoChip: { background: COLORS.panel, border: `1px solid ${COLORS.infoLine}`, color: COLORS.info, padding: "7px 13px", borderRadius: 20, fontSize: 13, fontWeight: 600 },
+  infoChipActive: { background: COLORS.info, color: "#ffffff", borderColor: COLORS.info },
   confirmBar: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap", background: COLORS.panel, border: `1px solid ${COLORS.line}`, borderRadius: 10, padding: "10px 14px", marginBottom: 18 },
   chipEdit: { background: COLORS.panel, border: `1px solid ${COLORS.line}`, color: COLORS.cream, padding: "6px 8px 6px 14px", borderRadius: 20, fontSize: 13, display: "inline-flex", alignItems: "center", gap: 4 },
   jornadaRow: { display: "flex", alignItems: "center", gap: 10, background: COLORS.panel, border: `1px solid ${COLORS.line}`, borderRadius: 10, padding: "12px 14px", cursor: "pointer" },
