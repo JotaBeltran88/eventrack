@@ -101,6 +101,24 @@ function jornadaEstado(evento, j) {
   return { total, conf, completo: total > 0 && conf === total, empezado: conf > 0 };
 }
 
+// Valores sospechosos de una jornada: celdas donde el Final supera lo disponible
+// (Final > inicial + entradas − salidas) ⇒ imposible, casi siempre un error de tecleo.
+function jornadaRevisar(evento, j) {
+  const issues = [];
+  for (const u of evento.ubicaciones) {
+    for (const p of evento.productos) {
+      const t = celdaTotales(j, u, p.id);
+      if (t.fin > t.ini) issues.push({ ubic: u, pid: p.id, prod: p.nombre, fin: t.fin, disp: t.ini });
+    }
+  }
+  return issues;
+}
+// ¿Esta celda concreta tiene un valor sospechoso? (Final > disponible)
+function celdaSospechosa(jornada, ubic, pid) {
+  const t = celdaTotales(jornada, ubic, pid);
+  return t.fin > t.ini;
+}
+
 function nuevoEvento(nombre, fecha) {
   return {
     id: "ev" + Date.now().toString(36),
@@ -1054,6 +1072,34 @@ function ConteoView({ evento, role, upd, jornada, jornadaActivaId, setJornadaAct
         );
       })()}
 
+      {(() => {
+        const conIssues = evento.jornadas
+          .map((j) => ({ j, n: jornadaRevisar(evento, j).length }))
+          .filter((x) => x.n > 0);
+        if (conIssues.length === 0) return null;
+        const totalIssues = conIssues.reduce((s, x) => s + x.n, 0);
+        return (
+          <div style={styles.errorBox}>
+            <div style={{ fontWeight: 700, color: COLORS.red, marginBottom: 8 }}>
+              ⛔ {totalIssues === 1 ? "1 valor a revisar" : `${totalIssues} valores a revisar`}
+            </div>
+            <div style={{ fontSize: 12.5, color: COLORS.dim, marginBottom: 9 }}>
+              Hay un Final mayor que el stock disponible (imposible) — probablemente un número mal escrito. Toca el día para ir a corregirlo; la celda aparece marcada en rojo.
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
+              {conIssues.map(({ j, n }) => {
+                const activa = j.id === jornadaActivaId;
+                return (
+                  <button key={j.id} onClick={() => setJornadaActivaId(j.id)} style={{ ...styles.errorChip, ...(activa ? styles.errorChipActive : {}) }}>
+                    {fechaLabel(j.fecha)} · {n}{j.editable === false ? " 🔒" : ""}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
+
       <div style={{ marginBottom: 16 }}>
         <button onClick={() => setMostrarPapel((v) => !v)} style={styles.linkBtn}>{mostrarPapel ? "▲" : "▼"} Plantilla / importar</button>
         {mostrarPapel && (
@@ -1110,14 +1156,16 @@ function ConteoView({ evento, role, upd, jornada, jornadaActivaId, setJornadaAct
           {evento.productos.filter((p) => p.categoria === catSel).map((p) => {
             const c = getCell(ubicActiva, p.id);
             const t = celdaTotales(jornada, ubicActiva, p.id);
+            const sospechosa = t.fin > t.ini;
             return (
               <div key={p.id} style={styles.row}>
                 <span style={{ flex: 2 }}>
                   <span style={{ color: COLORS.cream }}>{p.nombre}</span><span style={styles.unidad}> · {p.unidad}</span>
                   {(t.ent > 0 || t.sal > 0) && <div style={styles.movHint}>{t.ent > 0 ? `▲ +${t.ent} ` : ""}{t.sal > 0 ? `▼ −${t.sal} ` : ""}· disponible {t.ini}</div>}
+                  {sospechosa && <div style={{ ...styles.movHint, color: COLORS.red, fontWeight: 600 }}>⛔ Final ({t.fin}) mayor que el disponible ({t.ini}) — revisa el número</div>}
                 </span>
                 <input type="number" min="0" value={c.inicial || ""} placeholder="0" disabled={!puedeInicial} onChange={(e) => setValor(p.id, "inicial", e.target.value)} style={{ ...styles.input, ...(puedeInicial ? {} : styles.inputDisabled) }} />
-                <input type="number" min="0" value={c.final || ""} placeholder="0" disabled={!puedeContar} onChange={(e) => setValor(p.id, "final", e.target.value)} style={{ ...styles.input, ...(puedeContar ? {} : styles.inputDisabled) }} />
+                <input type="number" min="0" value={c.final || ""} placeholder="0" disabled={!puedeContar} onChange={(e) => setValor(p.id, "final", e.target.value)} style={{ ...styles.input, ...(puedeContar ? {} : styles.inputDisabled), ...(sospechosa ? styles.inputError : {}) }} />
                 <span style={{ ...styles.colNum, color: t.con > 0 ? COLORS.gold : COLORS.dim, fontWeight: 600 }}>{t.con}</span>
               </div>
             );
@@ -1605,6 +1653,10 @@ const styles = {
   alertBox: { background: COLORS.amberBg, border: `1px solid ${COLORS.amberLine}`, borderRadius: 10, padding: "12px 14px", marginBottom: 18 },
   alertChip: { background: COLORS.panel, border: `1px solid ${COLORS.amberLine}`, color: COLORS.amber, padding: "7px 13px", borderRadius: 20, fontSize: 13, fontWeight: 600 },
   alertChipActive: { background: COLORS.amber, color: "#ffffff", borderColor: COLORS.amber },
+  errorBox: { background: "#fef2f2", border: `1px solid #fecaca`, borderRadius: 10, padding: "12px 14px", marginBottom: 18 },
+  errorChip: { background: COLORS.panel, border: `1px solid #fecaca`, color: COLORS.red, padding: "7px 13px", borderRadius: 20, fontSize: 13, fontWeight: 600 },
+  errorChipActive: { background: COLORS.red, color: "#ffffff", borderColor: COLORS.red },
+  inputError: { borderColor: COLORS.red, background: "#fef2f2" },
   confirmBar: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap", background: COLORS.panel, border: `1px solid ${COLORS.line}`, borderRadius: 10, padding: "10px 14px", marginBottom: 18 },
   chipEdit: { background: COLORS.panel, border: `1px solid ${COLORS.line}`, color: COLORS.cream, padding: "6px 8px 6px 14px", borderRadius: 20, fontSize: 13, display: "inline-flex", alignItems: "center", gap: 4 },
   jornadaRow: { display: "flex", alignItems: "center", gap: 10, background: COLORS.panel, border: `1px solid ${COLORS.line}`, borderRadius: 10, padding: "12px 14px", cursor: "pointer" },
