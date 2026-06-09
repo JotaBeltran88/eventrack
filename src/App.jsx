@@ -119,13 +119,13 @@ function jornadaPorDefecto(jornadas) {
   return jornadas[0].id; // todas futuras o sin fecha → la primera
 }
 
-// ¿Una ubicación tiene información introducida? (algún Inicial/Final o algún movimiento)
-function ubicacionTieneDatos(j, u) {
+// ¿Se ha EMPEZADO a contar esta ubicación? No cuenta el Inicial precargado
+// (stock de partida): solo un Final introducido o un movimiento registrado.
+function ubicacionEmpezada(j, u) {
   const cont = j.conteo && j.conteo[u];
   if (cont) {
     for (const pid in cont) {
-      const c = cont[pid] || {};
-      if ((c.inicial || 0) !== 0 || (c.final || 0) !== 0) return true;
+      if (((cont[pid] || {}).final || 0) !== 0) return true;
     }
   }
   for (const m of (j.movimientos || [])) {
@@ -134,13 +134,13 @@ function ubicacionTieneDatos(j, u) {
   return false;
 }
 
-// Ubicaciones de una jornada SIN confirmar que tienen algo iniciado: datos
-// (Inicial/Final/movimientos) o al menos un nombre en "Realizado por".
+// Ubicaciones SIN confirmar donde alguien ha empezado: hay un nombre en
+// "Realizado por", o un Final/movimiento. El Inicial precargado NO cuenta.
 function jornadaPendienteConfirmar(evento, j) {
   return evento.ubicaciones.filter((u) => {
     if (j.confirmado && j.confirmado[u]) return false;
     const tieneNombre = !!(j.realizadoPor && j.realizadoPor[u] && String(j.realizadoPor[u]).trim());
-    return tieneNombre || ubicacionTieneDatos(j, u);
+    return tieneNombre || ubicacionEmpezada(j, u);
   });
 }
 
