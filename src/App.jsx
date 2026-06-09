@@ -101,6 +101,23 @@ function jornadaEstado(evento, j) {
   return { total, conf, completo: total > 0 && conf === total, empezado: conf > 0 };
 }
 
+// Jornada por defecto al abrir el evento: la del "día de trabajo" actual.
+// El día activo NO cambia hasta las 10:00 del día siguiente (antes de esa hora,
+// cuenta como el día anterior). Ej.: domingo 9:35 → se considera el sábado.
+function jornadaPorDefecto(jornadas) {
+  if (!jornadas || jornadas.length === 0) return null;
+  const now = new Date();
+  const ref = new Date(now);
+  if (now.getHours() < 10) ref.setDate(ref.getDate() - 1);
+  const hoy = `${ref.getFullYear()}-${String(ref.getMonth() + 1).padStart(2, "0")}-${String(ref.getDate()).padStart(2, "0")}`;
+  const exacto = jornadas.find((j) => j.fecha === hoy);
+  if (exacto) return exacto.id;
+  // Si no hay jornada para hoy, la más reciente cuya fecha ya haya pasado.
+  const pasadas = jornadas.filter((j) => j.fecha && j.fecha <= hoy).sort((a, b) => b.fecha.localeCompare(a.fecha));
+  if (pasadas.length) return pasadas[0].id;
+  return jornadas[0].id; // todas futuras o sin fecha → la primera
+}
+
 // ¿Una ubicación tiene información introducida? (algún Inicial/Final o algún movimiento)
 function ubicacionTieneDatos(j, u) {
   const cont = j.conteo && j.conteo[u];
@@ -626,7 +643,7 @@ function EventoDetalle({ evento, role, updateEvento, onGuardar }) {
   const esAdmin = role === "admin";
   const [modo, setModo] = useState(esAdmin && !evento.configurado ? "config" : "operar");
   const [tab, setTab] = useState("conteo");
-  const [jornadaActivaId, setJornadaActivaId] = useState(evento.jornadas[0]?.id || null);
+  const [jornadaActivaId, setJornadaActivaId] = useState(() => jornadaPorDefecto(evento.jornadas));
   const [ubicActiva, setUbicActiva] = useState(evento.ubicaciones[0] || "");
 
   const upd = (updater) => updateEvento(evento.id, updater);
@@ -637,7 +654,7 @@ function EventoDetalle({ evento, role, updateEvento, onGuardar }) {
 
   useEffect(() => {
     if (jornadaActivaId && !evento.jornadas.find((j) => j.id === jornadaActivaId)) {
-      setJornadaActivaId(evento.jornadas[0]?.id || null);
+      setJornadaActivaId(jornadaPorDefecto(evento.jornadas));
     }
   }, [evento.jornadas, jornadaActivaId]);
 
