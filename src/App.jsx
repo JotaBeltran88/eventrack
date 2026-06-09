@@ -144,32 +144,48 @@ function jornadaPendienteConfirmar(evento, j) {
   });
 }
 
-// Valores sospechosos de una jornada: celdas donde el Final supera lo disponible
-// (Final > inicial + entradas − salidas) ⇒ imposible, casi siempre un error de tecleo.
-function jornadaRevisar(evento, j) {
-  const issues = [];
+// Revisión de valores imposibles en TODO el evento, respetando el ENCADENADO.
+// El stock disponible al empezar un día = el Inicial contado ese día; si ese día
+// no se contó Inicial, se arrastra el stock que quedó el día anterior. Se marca un
+// Final que supere ese disponible (+ entradas − salidas) ⇒ imposible (error de tecleo).
+// Devuelve { incidencias:[{jId,fecha,ubic,pid,prod,cat,fin,disp}], susp:Set("jId|ubic|pid") }.
+function revisarEvento(evento) {
+  const js = [...evento.jornadas].sort((a, b) => String(a.fecha || "").localeCompare(String(b.fecha || "")));
+  const incidencias = [];
+  const susp = new Set();
   for (const u of evento.ubicaciones) {
     for (const p of evento.productos) {
-      const t = celdaTotales(j, u, p.id);
-      if (t.fin > t.ini) issues.push({ ubic: u, pid: p.id, prod: p.nombre, fin: t.fin, disp: t.ini });
+      let stock = null; // stock conocido al entrar al día (null = aún desconocido)
+      for (const j of js) {
+        const t = celdaTotales(j, u, p.id);
+        let avail = null;
+        if ((t.base || 0) > 0) avail = t.base;        // contó el Inicial ese día
+        else if (stock != null) avail = stock;         // arrastra el del día anterior
+        if (avail != null) {
+          const disp = avail + t.ent - t.sal;
+          if (t.fin > 0 && t.fin > disp) {
+            incidencias.push({ jId: j.id, fecha: j.fecha, ubic: u, pid: p.id, prod: p.nombre, cat: p.categoria, fin: t.fin, disp });
+            susp.add(j.id + "|" + u + "|" + p.id);
+          }
+          stock = (t.fin > 0) ? t.fin : disp; // lo que queda para el día siguiente
+        } else if (t.fin > 0) {
+          stock = t.fin; // primer dato sin Inicial conocido: lo fijamos sin validar
+        }
+      }
     }
   }
-  return issues;
-}
-// ¿Esta celda concreta tiene un valor sospechoso? (Final > disponible)
-function celdaSospechosa(jornada, ubic, pid) {
-  const t = celdaTotales(jornada, ubic, pid);
-  return t.fin > t.ini;
+  return { incidencias, susp };
 }
 
 // Banners de aviso (días sin terminar + valores a revisar). onIr(jornadaId)
 // se llama al tocar un día. Reutilizado en Conteo y Resumen.
-function AvisosJornadas({ evento, jornadaActivaId, onIr }) {
+function AvisosJornadas({ evento, jornadaActivaId, onIr, revision }) {
   const pendientes = [];
   evento.jornadas.forEach((j) => jornadaPendienteConfirmar(evento, j).forEach((u) => pendientes.push({ j, ubic: u })));
-  const conIssues = evento.jornadas.map((j) => ({ j, n: jornadaRevisar(evento, j).length })).filter((x) => x.n > 0);
-  if (pendientes.length === 0 && conIssues.length === 0) return null;
-  const totalIssues = conIssues.reduce((s, x) => s + x.n, 0);
+  const rev = React.useMemo(() => revision || revisarEvento(evento), [revision, evento]);
+  const incidencias = rev.incidencias;
+  const MAX = 40;
+  if (pendientes.length === 0 && incidencias.length === 0) return null;
   return (
     <>
       {pendientes.length > 0 && (
@@ -193,23 +209,26 @@ function AvisosJornadas({ evento, jornadaActivaId, onIr }) {
           </div>
         </div>
       )}
-      {conIssues.length > 0 && (
+      {incidencias.length > 0 && (
         <div style={styles.errorBox}>
           <div style={{ fontWeight: 700, color: COLORS.red, marginBottom: 8 }}>
-            ⛔ {totalIssues === 1 ? "1 valor a revisar" : `${totalIssues} valores a revisar`}
+            ⛔ {incidencias.length === 1 ? "1 valor a revisar" : `${incidencias.length} valores a revisar`}
           </div>
           <div style={{ fontSize: 12.5, color: COLORS.dim, marginBottom: 9 }}>
-            Hay un Final mayor que el stock disponible (imposible) — probablemente un número mal escrito. Toca el día para ir a corregirlo; la celda aparece marcada en rojo.
+            Final mayor que el stock disponible (imposible) — probablemente un número mal escrito. Toca el dato para ir directo a la celda (marcada en rojo).
           </div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
-            {conIssues.map(({ j, n }) => {
-              const activa = j.id === jornadaActivaId;
+            {incidencias.slice(0, MAX).map((it) => {
+              const activa = it.jId === jornadaActivaId;
               return (
-                <button key={j.id} onClick={() => onIr(j.id)} style={{ ...styles.errorChip, ...(activa ? styles.errorChipActive : {}) }}>
-                  {fechaLabel(j.fecha)} · {n}{j.editable === false ? " 🔒" : ""}
+                <button key={it.jId + "|" + it.ubic + "|" + it.pid} onClick={() => onIr(it.jId, it.ubic, it.cat)} style={{ ...styles.errorChip, ...(activa ? styles.errorChipActive : {}) }}>
+                  {fechaLabel(it.fecha)} · {it.ubic} · {it.prod} ({it.fin}{">"}{it.disp})
                 </button>
               );
             })}
+            {incidencias.length > MAX && (
+              <span style={{ fontSize: 12.5, color: COLORS.dim, alignSelf: "center" }}>+{incidencias.length - MAX} más</span>
+            )}
           </div>
         </div>
       )}
@@ -959,6 +978,7 @@ function ConteoView({ evento, role, upd, jornada, jornadaActivaId, setJornadaAct
   const invFileRef = React.useRef(null);
   const [mostrarPapel, setMostrarPapel] = useState(false);
   const [mostrarMov, setMostrarMov] = useState(false);
+  const revision = React.useMemo(() => revisarEvento(evento), [evento]);
   if (evento.ubicaciones.length === 0 || evento.productos.length === 0)
     return <div style={styles.empty}>Necesitas ubicaciones y referencias (Configuración) para el conteo.</div>;
   if (evento.jornadas.length === 0)
@@ -1146,7 +1166,7 @@ function ConteoView({ evento, role, upd, jornada, jornadaActivaId, setJornadaAct
     <div>
       <JornadaSelector evento={evento} jornadaActivaId={jornadaActivaId} setJornadaActivaId={setJornadaActivaId} />
 
-      <AvisosJornadas evento={evento} jornadaActivaId={jornadaActivaId} onIr={(id, u) => { setJornadaActivaId(id); if (u) setUbicActiva(u); }} />
+      <AvisosJornadas evento={evento} jornadaActivaId={jornadaActivaId} revision={revision} onIr={(id, u, cat) => { setJornadaActivaId(id); if (u) setUbicActiva(u); if (cat) setCatActiva(cat); }} />
 
       <div style={{ marginBottom: 16 }}>
         <button onClick={() => setMostrarPapel((v) => !v)} style={styles.linkBtn}>{mostrarPapel ? "▲" : "▼"} Plantilla / importar</button>
@@ -1204,13 +1224,14 @@ function ConteoView({ evento, role, upd, jornada, jornadaActivaId, setJornadaAct
           {evento.productos.filter((p) => p.categoria === catSel).map((p) => {
             const c = getCell(ubicActiva, p.id);
             const t = celdaTotales(jornada, ubicActiva, p.id);
-            const sospechosa = t.fin > t.ini;
+            const sospechosa = revision.susp.has(jornada.id + "|" + ubicActiva + "|" + p.id);
+            const incDisp = sospechosa ? (revision.incidencias.find((i) => i.jId === jornada.id && i.ubic === ubicActiva && i.pid === p.id) || {}).disp : 0;
             return (
               <div key={p.id} style={styles.row}>
                 <span style={{ flex: 2 }}>
                   <span style={{ color: COLORS.cream }}>{p.nombre}</span><span style={styles.unidad}> · {p.unidad}</span>
                   {(t.ent > 0 || t.sal > 0) && <div style={styles.movHint}>{t.ent > 0 ? `▲ +${t.ent} ` : ""}{t.sal > 0 ? `▼ −${t.sal} ` : ""}· disponible {t.ini}</div>}
-                  {sospechosa && <div style={{ ...styles.movHint, color: COLORS.red, fontWeight: 600 }}>⛔ Final ({t.fin}) mayor que el disponible ({t.ini}) — revisa el número</div>}
+                  {sospechosa && <div style={{ ...styles.movHint, color: COLORS.red, fontWeight: 600 }}>⛔ Final ({t.fin}) mayor que el disponible ({incDisp}) — revisa el número</div>}
                 </span>
                 <input type="number" min="0" value={c.inicial || ""} placeholder="0" disabled={!puedeInicial} onChange={(e) => setValor(p.id, "inicial", e.target.value)} style={{ ...styles.input, ...(puedeInicial ? {} : styles.inputDisabled) }} />
                 <input type="number" min="0" value={c.final || ""} placeholder="0" disabled={!puedeContar} onChange={(e) => setValor(p.id, "final", e.target.value)} style={{ ...styles.input, ...(puedeContar ? {} : styles.inputDisabled), ...(sospechosa ? styles.inputError : {}) }} />
